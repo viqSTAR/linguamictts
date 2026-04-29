@@ -35,23 +35,7 @@ export default function Samples() {
     }
 
     try {
-      const response = await fetch('http://localhost:4000/v1/demo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: voice.text,
-          voice: voice.id,
-          tone: voice.tone
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error("API Error");
-      }
-
-      const blob = await response.blob();
-      const audioUrl = URL.createObjectURL(blob);
-      const audio = new Audio(audioUrl);
+      const audio = new Audio(`/voices/${voice.id}.wav`);
       audioRef.current = audio;
 
       audio.onplay = () => {
@@ -61,15 +45,14 @@ export default function Samples() {
 
       audio.onended = () => {
         setPlaying(null);
-        URL.revokeObjectURL(audioUrl);
       };
 
-      audio.play();
+      await audio.play();
     } catch (error) {
       console.error(error);
       setLoading(null);
       setPlaying(null);
-      alert("Failed to connect to VoiceForge API. Make sure the Python backend is running on port 8000!");
+      alert("Failed to play sample audio.");
     }
   };
 

@@ -88,8 +88,8 @@ export default function Home() {
   };
   
   const handlePlayDemo = async () => {
-    if (isPlaying || isLoading) {
-      if (isPlaying && audioRef.current) {
+    if (isPlaying) {
+      if (audioRef.current) {
         audioRef.current.pause();
         setIsPlaying(false);
         if (isFinite(audioRef.current.duration)) {
@@ -102,24 +102,10 @@ export default function Home() {
     setIsLoading(true);
     
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/v1/demo`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: "Strap in, because this next jump is going to be absolutely legendary! Here we go!",
-          voice: "leo",
-          tone: "adventurous"
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error("API Error");
+      if (!audioRef.current) {
+        audioRef.current = new Audio('/voices/heroleo.wav');
       }
-
-      const blob = await response.blob();
-      const audioUrl = URL.createObjectURL(blob);
-      const audio = new Audio(audioUrl);
-      audioRef.current = audio;
+      const audio = audioRef.current;
       
       audio.onloadedmetadata = () => {
         if (isFinite(audio.duration)) {
@@ -143,16 +129,15 @@ export default function Home() {
         if (isFinite(audio.duration)) {
           setTimeLeft(audio.duration);
         }
-        URL.revokeObjectURL(audioUrl);
       };
       
-      audio.play();
+      await audio.play();
 
     } catch (error) {
       console.error("Demo play failed:", error);
       setIsLoading(false);
       setIsPlaying(false);
-      alert("Failed to connect to VoiceForge API. Make sure the Python backend is running on port 8000!");
+      alert("Failed to play demo audio. Please check your connection.");
     }
   };
 

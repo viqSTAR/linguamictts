@@ -18,6 +18,13 @@ export default function Register() {
     e.preventDefault();
     setLoading(true);
     setError('');
+
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters long.');
+      setLoading(false);
+      return;
+    }
+
     try {
       const res = await api.post('/auth/register', { email, password, name: email.split('@')[0] });
       localStorage.setItem('token', res.data.token);

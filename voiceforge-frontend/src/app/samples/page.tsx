@@ -5,8 +5,8 @@ import { motion } from 'framer-motion';
 import { Play, Pause, Volume2 } from 'lucide-react';
 
 const voices = [
-  { id: 'tara', name: 'Tara', tone: 'excited', tags: ['Energetic', 'Vibey'], desc: 'Perfect for high-energy announcements.', text: 'I am Tara, an energetic and vibey voice!' },
-  { id: 'leo', name: 'Leo', tone: 'adventurous', tags: ['Adventurous', 'Bold'], desc: 'Ideal for action and excitement.', text: 'I am Leo, an adventurous and bold voice!' },
+  { id: 'tara', name: 'Tara', tone: 'calm', tags: ['Calm', 'Airy'], desc: 'A light, gentle, and airy voice perfect for meditation and relaxation.', text: 'Hey!, I am tara, What about you?' },
+  { id: 'leo', name: 'Leo', tone: 'adventurous', tags: ['Adventurous', 'Bold'], desc: 'Ideal for action and excitement.', text: 'Hey! I\'m Leo. Are you ready for an adventure?' },
   { id: 'sarah', name: 'Sarah', tone: 'romantic', tags: ['Conversational', 'Warm'], desc: 'Soft, intimate, and warm.', text: 'I am Sarah, a conversational and warm voice!' },
   { id: 'echo', name: 'Echo', tone: 'calm', tags: ['Neutral', 'Professional'], desc: 'Clear and authoritative voice for news.', text: 'I am Echo, a neutral and professional voice.' },
   { id: 'onyx', name: 'Onyx', tone: 'horror', tags: ['Gravelly', 'Villain'], desc: 'A raspy, intense voice.', text: 'I am Onyx, a gravelly and villainous voice.' },

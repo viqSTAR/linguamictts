@@ -1,0 +1,39 @@
+services:
+  voiceforge-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: voiceforge-api
+
+    ports:
+      - "8000:8000"
+
+    # Load your real API key from .env file
+    env_file:
+      - .env
+
+    environment:
+      - ORPHEUS_TTS_LOCAL_PATH=/orpheus-tts-local
+      # Windows Docker Desktop: host.docker.internal → your PC's localhost
+      # LM Studio must be running on your PC at port 1234
+      - LM_STUDIO_HOST=host.docker.internal
+      - LM_STUDIO_PORT=1234
+
+    volumes:
+      # Cache whisper model so it doesn't re-download on every restart
+      - whisper-cache:/cache/huggingface
+
+    # GPU access — requires nvidia-container-toolkit installed
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    restart: unless-stopped
+
+volumes:
+  whisper-cache:

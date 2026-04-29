@@ -1,0 +1,40 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Environment secrets — never in Docker image
+.env
+
+# Generated audio files
+*.wav
+*.mp3
+*.ogg
+*.m4a
+
+# Test files
+*.tmp
+test_*
+
+# IDE
+.vscode/
+.idea/
+
+# Git
+.git/
+.gitignore
+
+# Docker itself
+Dockerfile
+docker-compose.yml
+
+# Roadmap / docs (not needed in image)
+*.xlsx
+*.md
+README*
+
+# Windows
+Thumbs.db
+Desktop.ini

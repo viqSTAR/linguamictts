@@ -1,0 +1,65 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id             String    @id @default(uuid())
+  email          String    @unique
+  passwordHash   String
+  name           String?
+  creditsBalance Int       @default(5000) // Free initial credits
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  apiKeys           ApiKey[]
+  transactions      CreditTransaction[]
+  usageLogs         UsageLog[]
+}
+
+model ApiKey {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id])
+  keyHash    String    @unique
+  prefix     String    // e.g., vf_xxxx (for UI display)
+  name       String    // e.g., "Production Key"
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  isActive   Boolean   @default(true)
+
+  usageLogs  UsageLog[]
+}
+
+model CreditTransaction {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  amount      Int      // Positive = top-up, Negative = deduction
+  type        String   // "TOPUP", "DEDUCTION", "BONUS"
+  description String?
+  referenceId String?  // Razorpay payment ID or similar
+  createdAt   DateTime @default(now())
+}
+
+model UsageLog {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id])
+  apiKeyId         String?
+  apiKey           ApiKey?  @relation(fields: [apiKeyId], references: [id])
+  
+  endpointType     String   // "TTS" or "STT"
+  charsCount       Int?
+  emotionTagsCount Int?
+  toneUsed         String?
+  creditsDeducted  Int      @default(0)
+  
+  createdAt        DateTime @default(now())
+}

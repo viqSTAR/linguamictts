@@ -1,0 +1,99 @@
+### 1. Health Check
+GET http://localhost:4000/health
+
+### 2. Register a New User
+# This returns your JWT Token AND your first API Key
+POST http://localhost:4000/auth/register
+Content-Type: application/json
+
+{
+  "name": "Test User",
+  "email": "test@voiceforge.com",
+  "password": "password123"
+}
+
+### 3. Login
+# Use this to get a new JWT token if yours expires
+POST http://localhost:4000/auth/login
+Content-Type: application/json
+
+{
+  "email": "test@voiceforge.com",
+  "password": "password123"
+}
+
+### 4. Get Current User Details (Requires JWT Token from Register/Login)
+# Replace {{token}} with your JWT Token
+GET http://localhost:4000/auth/me
+Authorization: Bearer {{token}}
+
+
+### ------------------------------------------------------------------
+### 🔑 API KEY MANAGEMENT
+### ------------------------------------------------------------------
+
+### 5. Create a New API Key
+# Replace {{token}} with your JWT Token
+POST http://localhost:4000/api-keys
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Production Key"
+}
+
+### 6. List API Keys
+# Replace {{token}} with your JWT Token
+GET http://localhost:4000/api-keys
+Authorization: Bearer {{token}}
+
+
+### ------------------------------------------------------------------
+### 🎙️ CORE API (Proxy to Python FastAPI)
+### ------------------------------------------------------------------
+
+### 7. Get Available Voices (Requires API Key)
+# Replace {{api_key}} with your raw API Key (e.g., 2b4c8f...)
+GET http://localhost:4000/v1/voices
+Authorization: Bearer {{api_key}}
+
+### 8. Text to Speech (Requires API Key)
+# Make sure your Python FastAPI server is running on port 8000!
+POST http://localhost:4000/v1/tts
+Authorization: Bearer {{api_key}}
+Content-Type: application/json
+
+{
+  "text": "<laugh> Hello from the Express Backend!",
+  "voice": "tara",
+  "tone": "calm"
+}
+
+### ------------------------------------------------------------------
+### 📈 USAGE & BILLING
+### ------------------------------------------------------------------
+
+### 9. View Usage Analytics
+# Replace {{token}} with your JWT Token
+GET http://localhost:4000/usage
+Authorization: Bearer {{token}}
+
+### 10. Create Stripe Payment Intent
+# Replace {{token}} with your JWT Token
+POST http://localhost:4000/billing/create-payment-intent
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "amountUSD": 10
+}
+
+### 11. Verify Stripe Payment
+# Replace {{token}} with your JWT Token and {{paymentIntentId}} with the ID returned above
+POST http://localhost:4000/billing/verify
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "paymentIntentId": "{{paymentIntentId}}"
+}

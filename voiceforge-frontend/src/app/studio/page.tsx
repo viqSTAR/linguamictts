@@ -298,25 +298,23 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
             <h3 className="text-lg font-semibold mb-6 flex items-center gap-2 text-neutral-800"><SlidersHorizontal className="w-5 h-5 text-orange-500"/> Studio Controls</h3>
             
             {/* Voice */}
-            <div className="mb-6">
+            <div className="mb-6 relative z-30">
               <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2">Voice Model</label>
-              <div className="relative">
-                <select value={voice} onChange={e => setVoice(e.target.value)} className="w-full bg-white border border-black/10 text-neutral-800 rounded-xl px-4 py-3 appearance-none focus:outline-none focus:ring-2 focus:ring-orange-500/30 focus:border-orange-500 font-medium capitalize cursor-pointer shadow-sm">
-                  {VOICES.map(v => <option key={v} value={v}>{v}</option>)}
-                </select>
-                <ChevronDown className="w-4 h-4 text-neutral-400 absolute right-4 top-3.5 pointer-events-none" />
-              </div>
+              <PremiumSelect 
+                value={voice} 
+                onChange={setVoice} 
+                options={VOICES.map(v => ({ label: v, value: v }))} 
+              />
             </div>
 
             {/* Tone */}
-            <div className="mb-6">
+            <div className="mb-6 relative z-20">
               <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2">Speaking Tone</label>
-              <div className="relative">
-                <select value={tone || 'none'} onChange={e => handleToneChange(e.target.value)} className="w-full bg-white border border-black/10 text-neutral-800 rounded-xl px-4 py-3 appearance-none focus:outline-none focus:ring-2 focus:ring-orange-500/30 focus:border-orange-500 font-medium capitalize cursor-pointer shadow-sm">
-                  {TONES.map(t => <option key={t} value={t}>{t === 'none' ? 'Neutral (No Tone)' : t}</option>)}
-                </select>
-                <ChevronDown className="w-4 h-4 text-neutral-400 absolute right-4 top-3.5 pointer-events-none" />
-              </div>
+              <PremiumSelect 
+                value={tone || 'none'} 
+                onChange={handleToneChange} 
+                options={TONES.map(t => ({ label: t === 'none' ? 'Neutral (No Tone)' : t, value: t }))} 
+              />
             </div>
 
             {/* Speed Slider (Glassy) */}
@@ -533,4 +531,66 @@ function SettingsView({ user }: { user: any }) {
       </div>
     </motion.div>
   )
+}
+
+function PremiumSelect({ value, options, onChange }: { value: string, options: {label: string, value: string}[], onChange: (val: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const selectedLabel = options.find(o => o.value === value)?.label || value;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button 
+        type="button"
+        onClick={() => setOpen(!open)} 
+        className={`w-full bg-white border ${open ? 'border-orange-500 ring-2 ring-orange-500/30' : 'border-black/10'} text-neutral-800 rounded-xl px-4 py-3 flex items-center justify-between focus:outline-none transition-all shadow-sm`}
+      >
+        <span className="font-medium capitalize">{selectedLabel}</span>
+        <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div 
+            initial={{ opacity: 0, y: -5, scale: 0.95 }} 
+            animate={{ opacity: 1, y: 0, scale: 1 }} 
+            exit={{ opacity: 0, y: -5, scale: 0.95 }}
+            transition={{ duration: 0.15, ease: "easeOut" }}
+            className="absolute top-full left-0 mt-2 w-full bg-white/95 backdrop-blur-xl border border-black/10 rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.08)] overflow-hidden z-[100] p-1"
+          >
+            <div className="max-h-60 overflow-y-auto">
+              {options.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => {
+                    onChange(opt.value);
+                    setOpen(false);
+                  }}
+                  className={`w-full text-left px-4 py-2.5 rounded-xl text-sm font-medium capitalize transition-all ${
+                    value === opt.value 
+                      ? 'bg-orange-50 text-orange-700' 
+                      : 'text-neutral-700 hover:bg-neutral-50 hover:text-orange-600'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
 }

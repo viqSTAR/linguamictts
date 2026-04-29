@@ -142,7 +142,7 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
   };
 
   const EMOTIONS = ['giggle', 'laugh', 'chuckle', 'sigh', 'cough', 'sniffle', 'groan', 'yawn', 'gasp'];
-  const VOICES = ['tara', 'leo', 'leah', 'jessi', 'dan', 'mia', 'zac', 'zoe', 'sarah', 'echo', 'onyx', 'fable'];
+  const VOICES = ['tara', 'leo', 'leah', 'jessi', 'dan', 'mia', 'zac', 'zoe'];
   const TONES = ['none', 'calm', 'romantic', 'storytelling', 'horror', 'angry', 'adventurous', 'excited', 'sad'];
 
   const handleToneChange = (newTone: string) => {

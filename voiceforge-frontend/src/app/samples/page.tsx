@@ -10,7 +10,7 @@ const voices = [
   { id: 'leah', name: 'Leah', tone: 'romantic', tags: ['Romantic', 'Vibey'], desc: 'A soft, intimate, and vibey voice.', text: 'Hey! I am Leah. Let\'s catch a vibe together.' },
   { id: 'jessi', name: 'Jessi', tone: 'excited', tags: ['Excited', 'Bubbly'], desc: 'A high-energy, enthusiastic voice perfect for celebrations.', text: 'Hey! I am Jessi. I can\'t wait to get started!' },
   { id: 'dan', name: 'Dan', tone: 'angry', tags: ['Angry', 'Disappointed'], desc: 'An intense, impatient, and frustrated voice.', text: 'Look, I\'m Dan. Honestly, I expected better from you.' },
-  { id: 'fable', name: 'Fable', tone: 'storytelling', tags: ['Storyteller', 'Children'], desc: 'A warm storyteller voice.', text: 'I am Fable, a storyteller voice.' }
+  { id: 'mia', name: 'Mia', tone: 'storytelling', tags: ['Storytelling', 'Captivating'], desc: 'A warm, inviting, and highly engaging narrative voice.', text: 'Hello, I am Mia. Gather around, because I have a story to tell you.' }
 ];
 
 export default function Samples() {

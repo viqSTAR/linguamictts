@@ -255,20 +255,36 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
             </div>
           </div>
 
-          {/* Output */}
-          <AnimatePresence>
-            {audioUrl && (
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-white/80 backdrop-blur-xl border border-orange-200/60 rounded-3xl p-6 shadow-[0_8px_30px_rgba(249,115,22,0.08)]">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-semibold uppercase tracking-wider text-orange-600 flex items-center gap-2"><Activity className="w-4 h-4"/> Audio Ready</h3>
-                  <a href={audioUrl} download="voiceforge-audio.wav" className="text-orange-600 hover:text-white hover:bg-orange-500 flex items-center gap-1.5 text-sm font-semibold bg-orange-50 px-4 py-2 rounded-xl transition-colors shadow-sm border border-orange-100 hover:border-orange-500">
-                    <Download className="w-4 h-4" /> Download
-                  </a>
+          {/* Output Section */}
+          <div className="bg-white/60 backdrop-blur-2xl border border-black/5 rounded-3xl p-6 shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
+            <h3 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-4 flex items-center gap-2"><Activity className="w-4 h-4 text-orange-500"/> Output</h3>
+            
+            {audioUrl ? (
+              <div className="bg-gradient-to-br from-orange-50 to-amber-50/50 border border-orange-200/60 rounded-2xl p-5 shadow-inner relative overflow-hidden">
+                {/* Background decorative blob */}
+                <div className="absolute -right-10 -top-10 w-32 h-32 bg-orange-400/10 blur-3xl rounded-full pointer-events-none" />
+                
+                <div className="flex flex-col md:flex-row items-center justify-between gap-4 relative z-10">
+                  <div className="flex-1 w-full">
+                    <audio controls src={audioUrl} className="w-full h-12 rounded-lg" autoPlay />
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <a href={audioUrl} download="voiceforge-audio.wav" className="bg-orange-500 text-white flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold shadow-[0_4px_14px_rgba(249,115,22,0.3)] hover:bg-orange-600 transition-all hover:scale-[1.02] active:scale-[0.98]">
+                      <Download className="w-4 h-4" /> Download
+                    </a>
+                  </div>
                 </div>
-                <audio controls src={audioUrl} className="w-full" autoPlay />
-              </motion.div>
+              </div>
+            ) : (
+              <div className="border-2 border-dashed border-black/5 bg-neutral-50/50 rounded-2xl p-10 flex flex-col items-center justify-center text-center">
+                 <div className="w-16 h-16 bg-white shadow-sm border border-black/5 rounded-full flex items-center justify-center mb-4">
+                   <Mic2 className="w-8 h-8 text-neutral-300" />
+                 </div>
+                 <h4 className="text-neutral-700 font-semibold mb-1">No audio generated yet</h4>
+                 <p className="text-sm text-neutral-400 max-w-sm">Hit the "Generate Voiceover" button above and your high-fidelity audio will appear right here.</p>
+              </div>
             )}
-          </AnimatePresence>
+          </div>
 
         </div>
 

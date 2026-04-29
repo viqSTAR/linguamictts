@@ -11,7 +11,8 @@ const voices = [
   { id: 'jessi', name: 'Jessi', tone: 'excited', tags: ['Excited', 'Bubbly'], desc: 'A high-energy, enthusiastic voice perfect for celebrations.', text: 'Hey! I am Jessi. I can\'t wait to get started!' },
   { id: 'dan', name: 'Dan', tone: 'angry', tags: ['Angry', 'Disappointed'], desc: 'An intense, impatient, and frustrated voice.', text: 'Look, I\'m Dan. Honestly, I expected better from you.' },
   { id: 'mia', name: 'Mia', tone: 'storytelling', tags: ['Storytelling', 'Captivating'], desc: 'A warm, inviting, and highly engaging narrative voice.', text: 'Hello, I am Mia. Gather around, because I have a story to tell you.' },
-  { id: 'zac', name: 'Zac', tone: 'angry', tags: ['Angry', 'Intense'], desc: 'A deeply intense, serious, and threatening voice.', text: 'Listen to me closely. I\'m Zac, and I don\'t give second chances.' }
+  { id: 'zac', name: 'Zac', tone: 'angry', tags: ['Angry', 'Intense'], desc: 'A deeply intense, serious, and threatening voice.', text: 'Listen to me closely. I\'m Zac, and I don\'t give second chances.' },
+  { id: 'zoe', name: 'Zoe', tone: 'sad', tags: ['Sad', 'Melancholic'], desc: 'A gentle, heartbroken, and emotionally heavy voice.', text: 'I am Zoe... I just wish things had turned out differently.' }
 ];
 
 export default function Samples() {

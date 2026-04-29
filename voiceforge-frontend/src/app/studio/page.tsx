@@ -257,7 +257,10 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
 
           {/* Output Section */}
           <div className="bg-white/60 backdrop-blur-2xl border border-black/5 rounded-3xl p-6 shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
-            <h3 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-4 flex items-center gap-2"><Activity className="w-4 h-4 text-orange-500"/> Output</h3>
+            <div className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-orange-50 border border-orange-100 text-orange-700 shadow-sm w-fit mb-5 text-xs font-bold uppercase tracking-widest">
+               <Activity className="w-4 h-4 text-orange-500" />
+               Output
+            </div>
             
             {audioUrl ? (
               <div className="bg-gradient-to-br from-orange-50 to-amber-50/50 border border-orange-200/60 rounded-2xl p-5 shadow-inner relative overflow-hidden">

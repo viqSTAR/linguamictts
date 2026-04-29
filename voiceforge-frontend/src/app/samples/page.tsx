@@ -5,14 +5,14 @@ import { motion } from 'framer-motion';
 import { Play, Pause, Volume2 } from 'lucide-react';
 
 const voices = [
-  { id: 'tara', name: 'Tara', tone: 'calm', tags: ['Calm', 'Airy'], desc: 'A light, gentle, and airy voice perfect for meditation and relaxation.', text: 'Hey!, I am tara, What about you?' },
-  { id: 'leo', name: 'Leo', tone: 'adventurous', tags: ['Adventurous', 'Bold'], desc: 'Ideal for action and excitement.', text: 'Hey! I\'m Leo. Are you ready for an adventure?' },
-  { id: 'leah', name: 'Leah', tone: 'romantic', tags: ['Romantic', 'Vibey'], desc: 'A soft, intimate, and vibey voice.', text: 'Hey! I am Leah. Let\'s catch a vibe together.' },
-  { id: 'jessi', name: 'Jessi', tone: 'excited', tags: ['Excited', 'Bubbly'], desc: 'A high-energy, enthusiastic voice perfect for celebrations.', text: 'Hey! I am Jessi. I can\'t wait to get started!' },
-  { id: 'dan', name: 'Dan', tone: 'angry', tags: ['Angry', 'Disappointed'], desc: 'An intense, impatient, and frustrated voice.', text: 'Look, I\'m Dan. Honestly, I expected better from you.' },
-  { id: 'mia', name: 'Mia', tone: 'storytelling', tags: ['Storytelling', 'Captivating'], desc: 'A warm, inviting, and highly engaging narrative voice.', text: 'Hello, I am Mia. Gather around, because I have a story to tell you.' },
-  { id: 'zac', name: 'Zac', tone: 'angry', tags: ['Angry', 'Intense'], desc: 'A deeply intense, serious, and threatening voice.', text: 'Listen to me closely. I\'m Zac, and I don\'t give second chances.' },
-  { id: 'zoe', name: 'Zoe', tone: 'sad', tags: ['Sad', 'Melancholic'], desc: 'A gentle, heartbroken, and emotionally heavy voice.', text: 'I am Zoe... I just wish things had turned out differently.' }
+  { id: 'tara', name: 'Tara', tone: 'calm', tags: ['Female', 'Calm', 'Airy'], desc: 'A light, gentle, and airy voice perfect for meditation and relaxation.', text: 'Hey!, I am tara, What about you?' },
+  { id: 'leo', name: 'Leo', tone: 'adventurous', tags: ['Male', 'Adventurous', 'Bold'], desc: 'Ideal for action and excitement.', text: 'Hey! I\'m Leo. Are you ready for an adventure?' },
+  { id: 'leah', name: 'Leah', tone: 'romantic', tags: ['Female', 'Romantic', 'Vibey'], desc: 'A soft, intimate, and vibey voice.', text: 'Hey! I am Leah. Let\'s catch a vibe together.' },
+  { id: 'jessi', name: 'Jessi', tone: 'excited', tags: ['Female', 'Excited', 'Bubbly'], desc: 'A high-energy, enthusiastic voice perfect for celebrations.', text: 'Hey! I am Jessi. I can\'t wait to get started!' },
+  { id: 'dan', name: 'Dan', tone: 'angry', tags: ['Male', 'Angry', 'Disappointed'], desc: 'An intense, impatient, and frustrated voice.', text: 'Look, I\'m Dan. Honestly, I expected better from you.' },
+  { id: 'mia', name: 'Mia', tone: 'storytelling', tags: ['Female', 'Storytelling', 'Captivating'], desc: 'A warm, inviting, and highly engaging narrative voice.', text: 'Hello, I am Mia. Gather around, because I have a story to tell you.' },
+  { id: 'zac', name: 'Zac', tone: 'angry', tags: ['Male', 'Angry', 'Intense'], desc: 'A deeply intense, serious, and threatening voice.', text: 'Listen to me closely. I\'m Zac, and I don\'t give second chances.' },
+  { id: 'zoe', name: 'Zoe', tone: 'sad', tags: ['Female', 'Sad', 'Melancholic'], desc: 'A gentle, heartbroken, and emotionally heavy voice.', text: 'I am Zoe... I just wish things had turned out differently.' }
 ];
 
 export default function Samples() {

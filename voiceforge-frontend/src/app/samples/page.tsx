@@ -8,7 +8,7 @@ const voices = [
   { id: 'tara', name: 'Tara', tone: 'calm', tags: ['Calm', 'Airy'], desc: 'A light, gentle, and airy voice perfect for meditation and relaxation.', text: 'Hey!, I am tara, What about you?' },
   { id: 'leo', name: 'Leo', tone: 'adventurous', tags: ['Adventurous', 'Bold'], desc: 'Ideal for action and excitement.', text: 'Hey! I\'m Leo. Are you ready for an adventure?' },
   { id: 'leah', name: 'Leah', tone: 'romantic', tags: ['Romantic', 'Vibey'], desc: 'A soft, intimate, and vibey voice.', text: 'Hey! I am Leah. Let\'s catch a vibe together.' },
-  { id: 'echo', name: 'Echo', tone: 'calm', tags: ['Neutral', 'Professional'], desc: 'Clear and authoritative voice for news.', text: 'I am Echo, a neutral and professional voice.' },
+  { id: 'jessi', name: 'Jessi', tone: 'excited', tags: ['Excited', 'Bubbly'], desc: 'A high-energy, enthusiastic voice perfect for celebrations.', text: 'Hey! I am Jessi. I can\'t wait to get started!' },
   { id: 'onyx', name: 'Onyx', tone: 'horror', tags: ['Gravelly', 'Villain'], desc: 'A raspy, intense voice.', text: 'I am Onyx, a gravelly and villainous voice.' },
   { id: 'fable', name: 'Fable', tone: 'storytelling', tags: ['Storyteller', 'Children'], desc: 'A warm storyteller voice.', text: 'I am Fable, a storyteller voice.' }
 ];

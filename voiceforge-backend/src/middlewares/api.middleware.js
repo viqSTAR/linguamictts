@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const prisma = require('../utils/prisma');
+const { ensureMonthlyCredits } = require('../utils/credits');
 
 const verifyApiKey = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -19,6 +20,11 @@ const verifyApiKey = async (req, res, next) => {
 
     if (!apiKeyRecord || !apiKeyRecord.isActive) {
       return res.status(401).json({ error: 'Unauthorized: Invalid or revoked API key' });
+    }
+
+    const updatedBalance = await ensureMonthlyCredits(apiKeyRecord.userId);
+    if (updatedBalance !== null && updatedBalance !== undefined) {
+      apiKeyRecord.user.creditsBalance = updatedBalance;
     }
 
     // Update lastUsedAt asynchronously

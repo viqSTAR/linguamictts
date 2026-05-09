@@ -72,13 +72,19 @@ const DottedWaveBackground = () => (
   </div>
 );
 
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 
 export default function Home() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number>(4);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [ctaHref, setCtaHref] = useState('/register');
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    setCtaHref(token ? '/studio' : '/register');
+  }, []);
 
   const formatTime = (seconds: number) => {
     if (isNaN(seconds) || !isFinite(seconds) || seconds < 0) return "0:04";
@@ -187,7 +193,7 @@ export default function Home() {
           initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.3 }}
           className="flex flex-col sm:flex-row gap-4 items-center justify-center w-full"
         >
-          <Link href="/register" className="h-14 px-8 rounded-full bg-black text-white font-medium text-lg flex items-center justify-center gap-2 hover:bg-neutral-800 transition-all hover:scale-105 duration-300 shadow-[0_10px_40px_-10px_rgba(249,115,22,0.3)]">
+          <Link href={ctaHref} className="h-14 px-8 rounded-full bg-black text-white font-medium text-lg flex items-center justify-center gap-2 hover:bg-neutral-800 transition-all hover:scale-105 duration-300 shadow-[0_10px_40px_-10px_rgba(249,115,22,0.3)]">
             Start Creating Free <Play className="w-5 h-5 opacity-70 ml-1" fill="currentColor" />
           </Link>
           <Link href="/samples" className="h-14 px-8 rounded-full bg-white/60 backdrop-blur-lg text-black border border-black/10 font-medium text-lg flex items-center justify-center gap-2 hover:bg-white transition-all hover:scale-105 duration-300 shadow-sm">

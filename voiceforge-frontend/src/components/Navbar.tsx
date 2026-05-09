@@ -8,12 +8,32 @@ import { ArrowRight } from 'lucide-react';
 export default function Navbar() {
   const { scrollY } = useScroll();
   const [isScrolled, setIsScrolled] = useState(false);
+  const [ctaHref, setCtaHref] = useState('/register');
 
   useEffect(() => {
     return scrollY.onChange((latest) => {
       setIsScrolled(latest > 20);
     });
   }, [scrollY]);
+
+  useEffect(() => {
+    const updateCtaHref = () => {
+      if (typeof window === 'undefined') return;
+      const token = localStorage.getItem('token');
+      setCtaHref(token ? '/studio' : '/register');
+    };
+
+    updateCtaHref();
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === 'token') {
+        updateCtaHref();
+      }
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
 
   return (
     <div className="fixed top-6 left-0 right-0 z-50 flex justify-center px-6 pointer-events-none">
@@ -113,7 +133,7 @@ export default function Navbar() {
           }}
           transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
         >
-          <Link href="/register" className="h-10 px-5 rounded-full bg-black text-white font-semibold text-sm flex items-center gap-2 hover:bg-neutral-800 transition-colors">
+          <Link href={ctaHref} className="h-10 px-5 rounded-full bg-black text-white font-semibold text-sm flex items-center gap-2 hover:bg-neutral-800 transition-colors">
             Get Started <ArrowRight className="w-4 h-4" />
           </Link>
         </motion.div>

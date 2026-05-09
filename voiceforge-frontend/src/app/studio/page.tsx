@@ -11,8 +11,9 @@ import api from '@/lib/api';
 
 const tabs = [
   { id: 'playground', label: 'Studio Playground', icon: Mic2 },
-  { id: 'billing', label: 'Usage & Billing', icon: CreditCard },
-  { id: 'settings', label: 'Settings', icon: Settings },
+  { id: 'api-keys',   label: 'API Keys',           icon: KeyRound },
+  { id: 'billing',   label: 'Usage & Billing',     icon: CreditCard },
+  { id: 'settings',  label: 'Settings',            icon: Settings },
 ];
 
 export default function Studio() {
@@ -24,6 +25,13 @@ export default function Studio() {
   const [authLoading, setAuthLoading] = useState(true);
 
   useEffect(() => {
+    // Instant redirect — no waiting for API if token is absent
+    const token = localStorage.getItem('token');
+    if (!token) {
+      router.replace('/login');
+      return;
+    }
+    // Validate token with server (handles expired/invalid tokens)
     api.get('/auth/me')
       .then(res => {
         setUser(res.data.user);
@@ -31,7 +39,7 @@ export default function Studio() {
       })
       .catch(() => {
         localStorage.removeItem('token');
-        router.push('/login');
+        router.replace('/login');
       });
   }, [router]);
 
@@ -114,8 +122,9 @@ export default function Studio() {
         <main className="p-8 max-w-5xl mx-auto w-full pb-20">
           <AnimatePresence mode="wait">
             {activeTab === 'playground' && <PlaygroundView key="playground" text={text} setText={setText} user={user} setUser={setUser} />}
-            {activeTab === 'billing' && <BillingView key="billing" user={user} />}
-            {activeTab === 'settings' && <SettingsView key="settings" user={user} />}
+            {activeTab === 'api-keys'   && <ApiKeysView   key="api-keys" />}
+            {activeTab === 'billing'   && <BillingView   key="billing" user={user} />}
+            {activeTab === 'settings'  && <SettingsView  key="settings" user={user} setUser={setUser} />}
           </AnimatePresence>
         </main>
       </div>
@@ -126,8 +135,12 @@ export default function Studio() {
 // Sub-components
 function PlaygroundView({ text, setText, user, setUser }: { text: string, setText: (val: string) => void, user: any, setUser: any }) {
   const [generating, setGenerating] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const nextPlayTimeRef = useRef<number>(0);
+
   const [voice, setVoice] = useState('tara');
   const [tone, setTone] = useState('');
   const [speed, setSpeed] = useState(1.0);
@@ -135,6 +148,7 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
   const [temperature, setTemperature] = useState(0.35);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const outputRef = useRef<HTMLDivElement>(null);
 
   const TONE_SPEEDS: Record<string, number> = {
     calm: 0.94, romantic: 0.92, storytelling: 0.95, horror: 0.93, 
@@ -148,7 +162,9 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
   const handleToneChange = (newTone: string) => {
     setTone(newTone === 'none' ? '' : newTone);
     if (newTone !== 'none' && TONE_SPEEDS[newTone]) {
-      setSpeed(TONE_SPEEDS[newTone]);
+      const presetSpeed = TONE_SPEEDS[newTone];
+      const clampedSpeed = Math.min(1.10, Math.max(0.90, presetSpeed));
+      setSpeed(clampedSpeed);
     } else {
       setSpeed(1.0);
     }
@@ -182,22 +198,165 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
   const handleGenerate = async () => {
     if (!text.trim()) return;
     setGenerating(true);
+    setIsPlaying(true);
+    setAudioUrl(null);
+    
+    // Initialize Audio Context for streaming playback
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    const context = audioContextRef.current;
+    if (context.state === 'suspended') {
+      await context.resume();
+    }
+    nextPlayTimeRef.current = context.currentTime + 0.1;
+
     try {
-      const payload: any = { text, voice_id: voice };
+      const resolvedVoice = voice === 'jessi' ? 'jess' : voice;
+      const payload: any = { text, voice: resolvedVoice };
       if (tone) payload.tone = tone;
-      if (speed !== 1.0) payload.speed = speed;
+      if (!tone && speed !== 1.0) payload.speed = speed;
       if (temperature !== 0.35) payload.temperature = temperature;
 
-      const res = await api.post('/v1/studio/tts', payload, { responseType: 'blob' });
-      const url = URL.createObjectURL(new Blob([res.data], { type: 'audio/wav' }));
-      setAudioUrl(url);
+      const token = localStorage.getItem('token') || '';
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
       
-      setUser((prev: any) => ({ ...prev, creditsBalance: Math.max(0, prev.creditsBalance - text.length) }));
+      const response = await fetch(`${API_URL}/v1/studio/tts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+         throw new Error('Server error: ' + response.status);
+      }
+
+      const remainingCredits = response.headers.get('x-credits-remaining');
+      if (remainingCredits) {
+         setUser((prev: any) => ({ ...prev, creditsBalance: parseInt(remainingCredits, 10) }));
+      } else {
+         setUser((prev: any) => ({ ...prev, creditsBalance: Math.max(0, prev.creditsBalance - text.length) }));
+      }
+
+      if (!response.body) throw new Error("ReadableStream not supported");
+      
+      const reader = response.body.getReader();
+      const SAMPLE_RATE = 24000;
+      const chunksData: Uint8Array[] = [];
+      let leftoverBuffer = new Uint8Array(0);
+      let headerStripped = false;
+      let headerBytesToStrip = 44;
+      const MIN_CHUNK_SIZE = 24000; // Buffer 0.5 seconds of audio to prevent reverb/glitches
+
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (value && value.length > 0) {
+          let processValue = value;
+          
+          if (!headerStripped) {
+              if (processValue.length >= headerBytesToStrip) {
+                  processValue = processValue.slice(headerBytesToStrip);
+                  headerStripped = true;
+              } else {
+                  headerBytesToStrip -= processValue.length;
+                  processValue = new Uint8Array(0);
+              }
+          }
+
+          if (processValue.length > 0) {
+              chunksData.push(processValue);
+          }
+
+          const combined = new Uint8Array(leftoverBuffer.length + processValue.length);
+          combined.set(leftoverBuffer, 0);
+          combined.set(processValue, leftoverBuffer.length);
+
+          // Only schedule playback if we have a decent chunk size, to prevent micro-stutters/reverb
+          if (!done && combined.length < MIN_CHUNK_SIZE) {
+              leftoverBuffer = combined;
+              continue;
+          }
+
+          const completeSamples = Math.floor(combined.length / 2);
+          const usableBytes = completeSamples * 2;
+          
+          leftoverBuffer = combined.slice(usableBytes);
+
+          if (completeSamples > 0) {
+              const int16Array = new Int16Array(combined.buffer, combined.byteOffset, completeSamples);
+              const float32Array = new Float32Array(int16Array.length);
+              for (let i = 0; i < int16Array.length; i++) {
+                float32Array[i] = int16Array[i] / 32768.0;
+              }
+
+              const audioBuffer = context.createBuffer(1, float32Array.length, SAMPLE_RATE);
+              audioBuffer.copyToChannel(float32Array, 0);
+
+              const source = context.createBufferSource();
+              source.buffer = audioBuffer;
+              source.connect(context.destination);
+
+              const startTime = Math.max(context.currentTime, nextPlayTimeRef.current);
+              source.start(startTime);
+              nextPlayTimeRef.current = startTime + audioBuffer.duration;
+              
+              setGenerating(false);
+          }
+        }
+        
+        if (done) break;
+      }
+      
+      // Stream finished -> Stitch chunks into a downloadable WAV
+      const totalLength = chunksData.reduce((acc, val) => acc + val.length, 0);
+      const allPcm = new Uint8Array(totalLength);
+      let offset = 0;
+      for (const chunk of chunksData) {
+        allPcm.set(chunk, offset);
+        offset += chunk.length;
+      }
+      
+      const buffer = new ArrayBuffer(44 + allPcm.length);
+      const view = new DataView(buffer);
+      const writeString = (pos: number, str: string) => {
+        for (let i = 0; i < str.length; i++) view.setUint8(pos + i, str.charCodeAt(i));
+      };
+      
+      writeString(0, 'RIFF');
+      view.setUint32(4, 36 + allPcm.length, true);
+      writeString(8, 'WAVE');
+      writeString(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true); // PCM format
+      view.setUint16(22, 1, true); // 1 channel
+      view.setUint32(24, SAMPLE_RATE, true);
+      view.setUint32(28, SAMPLE_RATE * 2, true); // Byte rate
+      view.setUint16(32, 2, true); // Block align
+      view.setUint16(34, 16, true); // Bits per sample
+      writeString(36, 'data');
+      view.setUint32(40, allPcm.length, true);
+      
+      new Uint8Array(buffer, 44).set(allPcm);
+      
+      const blobUrl = URL.createObjectURL(new Blob([buffer], { type: 'audio/wav' }));
+      setAudioUrl(blobUrl);
+
     } catch (err) {
       console.error('Generation failed', err);
       alert('Failed to generate audio. Check credits or backend status.');
-    } finally {
       setGenerating(false);
+    } finally {
+      const context = audioContextRef.current;
+      if (context) {
+        const remainingTime = Math.max(0, nextPlayTimeRef.current - context.currentTime);
+        setTimeout(() => setIsPlaying(false), remainingTime * 1000);
+      } else {
+        setIsPlaying(false);
+      }
     }
   };
 
@@ -247,16 +406,16 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
             <div className="p-4 border-t border-black/5 bg-neutral-50/50">
               <button 
                 onClick={handleGenerate}
-                disabled={generating || text.length === 0}
+                disabled={generating || isPlaying || text.length === 0}
                 className="w-full bg-gradient-to-br from-orange-500 to-amber-500 text-white px-8 py-4 rounded-2xl font-semibold shadow-[0_8px_20px_rgba(249,115,22,0.25)] hover:shadow-[0_12px_25px_rgba(249,115,22,0.35)] transition-all flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {generating ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Wand2 className="w-5 h-5" /> Generate Voiceover</>}
+                {generating ? <Loader2 className="w-5 h-5 animate-spin" /> : isPlaying ? <><Activity className="w-5 h-5 animate-pulse" /> Playing Live Stream...</> : <><Wand2 className="w-5 h-5" /> Generate Voiceover</>}
               </button>
             </div>
           </div>
 
           {/* Output Section */}
-          <div className="bg-white/60 backdrop-blur-2xl border border-black/5 rounded-3xl p-6 shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
+          <div ref={outputRef} className="bg-white/60 backdrop-blur-2xl border border-black/5 rounded-3xl p-6 shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
             <div className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-orange-50 border border-orange-100 text-orange-700 shadow-sm w-fit mb-5 text-xs font-bold uppercase tracking-widest">
                <Activity className="w-4 h-4 text-orange-500" />
                Output
@@ -269,7 +428,7 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
                 
                 <div className="flex flex-col md:flex-row items-center justify-between gap-4 relative z-10">
                   <div className="flex-1 w-full">
-                    <audio controls src={audioUrl} className="w-full h-12 rounded-lg" autoPlay />
+                    <audio controls src={audioUrl} className="w-full h-12 rounded-lg" />
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
                     <a href={audioUrl} download="voiceforge-audio.wav" className="bg-orange-500 text-white flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold shadow-[0_4px_14px_rgba(249,115,22,0.3)] hover:bg-orange-600 transition-all hover:scale-[1.02] active:scale-[0.98]">
@@ -277,6 +436,17 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
                     </a>
                   </div>
                 </div>
+              </div>
+            ) : isPlaying ? (
+              <div className="border-2 border-orange-200 bg-orange-50/50 rounded-2xl p-10 flex flex-col items-center justify-center text-center shadow-inner relative overflow-hidden">
+                 <div className="absolute inset-0 w-full h-full pointer-events-none z-0">
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-orange-400/20 blur-[80px] rounded-full animate-pulse" />
+                 </div>
+                 <div className="w-16 h-16 bg-white shadow-lg border border-orange-100 rounded-full flex items-center justify-center mb-4 relative z-10 animate-bounce">
+                   <Activity className="w-8 h-8 text-orange-500" />
+                 </div>
+                 <h4 className="text-orange-900 font-semibold mb-1 relative z-10 text-lg">Live Streaming Active</h4>
+                 <p className="text-sm text-orange-700 max-w-sm relative z-10 font-medium">Your voiceover is playing in real-time. Stand by...</p>
               </div>
             ) : (
               <div className="border-2 border-dashed border-black/5 bg-neutral-50/50 rounded-2xl p-10 flex flex-col items-center justify-center text-center">
@@ -324,13 +494,13 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
                 <span className="text-xs font-bold text-orange-700 bg-orange-100 px-2 py-0.5 rounded-md border border-orange-200">{speed.toFixed(2)}x</span>
               </div>
               <input 
-                type="range" min="0.80" max="1.30" step="0.01" 
+                type="range" min="0.90" max="1.10" step="0.01" 
                 value={speed} onChange={e => setSpeed(parseFloat(e.target.value))}
                 className="w-full h-2 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/30"
               />
               <div className="flex justify-between text-[10px] text-neutral-400 mt-1.5 font-medium uppercase tracking-widest">
-                <span>0.8x Slower</span>
-                <span>1.3x Faster</span>
+                <span>0.9x Slower</span>
+                <span>1.1x Faster</span>
               </div>
             </div>
 
@@ -455,9 +625,14 @@ function ApiKeysView() {
 }
 
 function BillingView({ user }: { user: any }) {
-  const maxCredits = 12000;
-  const used = maxCredits - (user?.creditsBalance || 0);
-  const percent = Math.min(100, Math.max(0, (used / maxCredits) * 100));
+  const planName = (user?.plan || 'FREE').toString().toLowerCase();
+  const planLabel = planName.charAt(0).toUpperCase() + planName.slice(1);
+  const monthlyAllocation = user?.planMonthlyCredits || 10000;
+  const balance = user?.creditsBalance || 0;
+  // Credits used from this month's allocation (clamped — top-ups can push balance above allocation)
+  const usedFromMonthly = Math.max(0, monthlyAllocation - balance);
+  const percent = Math.min(100, Math.max(0, (usedFromMonthly / monthlyAllocation) * 100));
+  const hasTopUpSurplus = balance > monthlyAllocation;
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
@@ -467,70 +642,117 @@ function BillingView({ user }: { user: any }) {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        {/* Plan Card */}
         <div className="bg-white border border-black/5 rounded-2xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.03)] flex flex-col justify-between">
           <div className="flex items-center gap-2 text-sm font-semibold text-neutral-500 uppercase tracking-wider mb-6">
-             <CreditCard className="w-4 h-4" /> Current Plan
+            <CreditCard className="w-4 h-4" /> Current Plan
           </div>
           <div>
-            <h2 className="text-3xl font-semibold mb-1">Free Tier</h2>
-            <p className="text-neutral-500 text-sm">12,000 characters / month</p>
+            <h2 className="text-3xl font-semibold mb-1">{planLabel} Plan</h2>
+            <p className="text-neutral-500 text-sm">{monthlyAllocation.toLocaleString()} credits / month</p>
+            {planName === 'free' && (
+              <p className="text-xs text-orange-600 font-semibold mt-2">12,000 credits bonus first month</p>
+            )}
           </div>
-          <button className="mt-8 w-full py-2.5 bg-orange-50 text-orange-600 font-semibold rounded-xl hover:bg-orange-100 transition-colors border border-orange-100 shadow-sm">
-            Upgrade Plan
-          </button>
+          <Link href="/pricing" className="mt-8 w-full py-2.5 bg-orange-50 text-orange-600 font-semibold rounded-xl hover:bg-orange-100 transition-colors border border-orange-100 shadow-sm text-center block">
+            {planName === 'free' ? 'Upgrade Plan →' : 'Change Plan →'}
+          </Link>
         </div>
 
+        {/* Usage Meter */}
         <div className="bg-white border border-black/5 rounded-2xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.03)] md:col-span-2">
-           <div className="flex items-center justify-between mb-8">
-              <div className="text-sm font-semibold text-neutral-500 uppercase tracking-wider">Credits Usage</div>
-              <div className="text-sm font-medium text-neutral-500 bg-neutral-100 px-3 py-1 rounded-full">Resets every 30 days</div>
-           </div>
-           
-           <div className="space-y-4">
-             <div className="flex justify-between items-end">
-               <div>
-                 <span className="text-4xl font-semibold text-neutral-900">{used.toLocaleString()}</span>
-                 <span className="text-neutral-500 ml-2">used</span>
-               </div>
-               <span className="text-neutral-400 font-medium">12,000 limit</span>
-             </div>
-             <div className="h-4 bg-neutral-100 rounded-full w-full overflow-hidden shadow-inner">
-                <div className="h-full bg-gradient-to-r from-orange-400 to-amber-400 rounded-full transition-all duration-1000" style={{ width: `${percent}%` }} />
-             </div>
-           </div>
+          <div className="flex items-center justify-between mb-6">
+            <div className="text-sm font-semibold text-neutral-500 uppercase tracking-wider">Credits Usage</div>
+            <div className="text-sm font-medium text-neutral-500 bg-neutral-100 px-3 py-1 rounded-full">Resets monthly</div>
+          </div>
+
+          {/* Current balance hero */}
+          <div className="flex items-end gap-2 mb-6">
+            <span className="text-5xl font-bold text-neutral-900">{balance.toLocaleString()}</span>
+            <span className="text-neutral-500 mb-1">credits remaining</span>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-neutral-500">{usedFromMonthly.toLocaleString()} used from monthly allocation</span>
+              <span className="text-neutral-400">{monthlyAllocation.toLocaleString()} / mo</span>
+            </div>
+            <div className="h-3 bg-neutral-100 rounded-full w-full overflow-hidden shadow-inner">
+              <div
+                className="h-full bg-gradient-to-r from-orange-400 to-amber-400 rounded-full transition-all duration-1000"
+                style={{ width: `${percent}%` }}
+              />
+            </div>
+          </div>
+
+          {hasTopUpSurplus && (
+            <div className="mt-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 font-medium">
+              ✨ You have <strong>{(balance - monthlyAllocation).toLocaleString()}</strong> bonus credits from top-ups above your plan limit.
+            </div>
+          )}
         </div>
       </div>
     </motion.div>
   )
 }
 
-function SettingsView({ user }: { user: any }) {
+function SettingsView({ user, setUser }: { user: any, setUser: any }) {
+  const [name, setName] = useState(user?.name || '');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = async () => {
+    if (!name.trim()) return;
+    setSaving(true);
+    try {
+      const res = await api.put('/auth/me', { name: name.trim() });
+      setUser((prev: any) => ({ ...prev, name: res.data.user.name }));
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch {
+      alert('Failed to save changes. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-       <div className="mb-8">
+      <div className="mb-8">
         <h1 className="text-2xl font-semibold mb-2">Account Settings</h1>
         <p className="text-neutral-500">Manage your profile and preferences.</p>
       </div>
 
       <div className="bg-white border border-black/5 rounded-2xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.03)] max-w-2xl">
-         <form className="space-y-6">
-           <div>
-             <label className="block text-sm font-semibold text-neutral-700 mb-2">Full Name</label>
-             <input type="text" defaultValue={user?.name || ''} className="w-full h-11 bg-white border border-black/10 rounded-xl px-4 text-neutral-900 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all" />
-           </div>
-           <div>
-             <label className="block text-sm font-semibold text-neutral-700 mb-2">Email Address</label>
-             <input type="email" disabled defaultValue={user?.email || ''} className="w-full h-11 bg-neutral-50 border border-black/10 rounded-xl px-4 text-neutral-500 cursor-not-allowed" />
-           </div>
-           <div className="pt-4 border-t border-black/5">
-             <button type="button" className="bg-black text-white px-6 py-2.5 rounded-xl font-medium shadow-[0_4px_14px_0_rgba(0,0,0,0.1)] hover:bg-neutral-800 transition-all hover:scale-[1.02] active:scale-[0.98]">
-               Save Changes
-             </button>
-           </div>
-         </form>
+        <div className="space-y-6">
+          <div>
+            <label className="block text-sm font-semibold text-neutral-700 mb-2">Full Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              className="w-full h-11 bg-white border border-black/10 rounded-xl px-4 text-neutral-900 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-neutral-700 mb-2">Email Address</label>
+            <input type="email" disabled defaultValue={user?.email || ''} className="w-full h-11 bg-neutral-50 border border-black/10 rounded-xl px-4 text-neutral-500 cursor-not-allowed" />
+          </div>
+          <div className="pt-4 border-t border-black/5 flex items-center gap-4">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || !name.trim()}
+              className="bg-black text-white px-6 py-2.5 rounded-xl font-medium shadow-[0_4px_14px_0_rgba(0,0,0,0.1)] hover:bg-neutral-800 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving...</> : 'Save Changes'}
+            </button>
+            {saved && <span className="text-green-600 text-sm font-semibold">✓ Saved successfully</span>}
+          </div>
+        </div>
       </div>
     </motion.div>
-  )
+  );
 }
 
 function PremiumSelect({ value, options, onChange }: { value: string, options: {label: string, value: string}[], onChange: (val: string) => void }) {

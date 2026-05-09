@@ -6,7 +6,23 @@ const { verifyToken } = require('../middlewares/auth.middleware');
 
 const router = express.Router();
 
-const upload = multer({ storage: multer.memoryStorage() });
+const MAX_STT_FILE_MB = 25;
+const MAX_STT_FILE_BYTES = MAX_STT_FILE_MB * 1024 * 1024;
+
+const upload = multer({
+	storage: multer.memoryStorage(),
+	limits: { fileSize: MAX_STT_FILE_BYTES },
+});
+
+const handleSttUpload = (req, res, next) => {
+	upload.single('file')(req, res, (err) => {
+		if (!err) return next();
+		if (err.code === 'LIMIT_FILE_SIZE') {
+			return res.status(400).json({ error: `Audio file too large. Max ${MAX_STT_FILE_MB}MB.` });
+		}
+		return res.status(400).json({ error: 'Failed to process audio upload' });
+	});
+};
 
 // Unauthenticated demo endpoint for landing page
 router.post('/demo', proxyDemoTTS);
@@ -17,7 +33,7 @@ router.post('/studio/tts', verifyToken, proxyStudioTTS);
 // Public API endpoints (use API key auth)
 router.use(verifyApiKey);
 router.post('/tts', proxyTTS);
-router.post('/stt', upload.single('file'), proxySTT);
+router.post('/stt', handleSttUpload, proxySTT);
 router.get('/voices', proxyVoices);
 
 module.exports = router;

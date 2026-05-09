@@ -2,7 +2,7 @@ services:
   voiceforge-api:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile        # GPU build (cu128 → RTX 5070 Ti / sm_120)
 
     container_name: voiceforge-api
 
@@ -32,6 +32,31 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+
+    restart: unless-stopped
+
+  # ── CPU-only dev build (no GPU, faster build, for testing) ─────────────────
+  voiceforge-api-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev    # CPU-only build
+
+    container_name: voiceforge-api-dev
+    profiles: ["dev"]              # only runs with: docker compose --profile dev up
+
+    ports:
+      - "8001:8000"               # mapped to 8001 to avoid conflict with GPU build
+
+    env_file:
+      - .env
+
+    environment:
+      - ORPHEUS_TTS_LOCAL_PATH=/orpheus-tts-local
+      - LM_STUDIO_HOST=host.docker.internal
+      - LM_STUDIO_PORT=1234
+
+    volumes:
+      - whisper-cache:/cache/huggingface
 
     restart: unless-stopped
 

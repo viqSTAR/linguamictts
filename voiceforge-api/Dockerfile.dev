@@ -1,9 +1,10 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# VoiceForge API — LOCAL DEV Dockerfile (CPU only, fast build ~200MB)
-# Use this for local testing on Windows/Docker Desktop
-# For GPU production (RunPod): use the main Dockerfile
+# VoiceForge API — LOCAL DEV Dockerfile (CPU only, fast build)
+# Base: python:3.11-slim + CPU PyTorch — no GPU, no CUDA headaches locally
+# Use this for local testing on Windows/Docker Desktop WITHOUT a GPU.
+# For GPU production (RTX 5070 Ti / RunPod): use the main Dockerfile (cu128)
 # ─────────────────────────────────────────────────────────────────────────────
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
@@ -24,7 +25,7 @@ RUN git clone --depth=1 https://github.com/isaiahbjork/orpheus-tts-local /orpheu
 # ── App directory ─────────────────────────────────────────────────────────────
 WORKDIR /app
 
-# ── Python dependencies (CPU PyTorch — much smaller) ─────────────────────────
+# ── CPU PyTorch (much smaller; no CUDA required) ──────────────────────────────
 RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 
 # ── Core app deps ─────────────────────────────────────────────────────────────

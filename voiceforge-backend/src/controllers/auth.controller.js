@@ -1,8 +1,10 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const prisma = require('../utils/prisma');
+const { FIRST_MONTH_CREDITS, DEFAULT_MONTHLY_CREDITS } = require('../utils/credits');
 const { OAuth2Client } = require('google-auth-library');
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
 
 const register = async (req, res) => {
   try {
@@ -22,12 +24,15 @@ const register = async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(password, salt);
 
-    // Create user (starts with 5000 free credits as per schema)
+    // Create user (starts with monthly free credits)
     const user = await prisma.user.create({
       data: {
         email,
         passwordHash,
         name,
+        creditsBalance: FIRST_MONTH_CREDITS,
+        plan: 'FREE',
+        planMonthlyCredits: DEFAULT_MONTHLY_CREDITS,
       },
     });
 
@@ -57,6 +62,8 @@ const register = async (req, res) => {
         email: user.email,
         name: user.name,
         creditsBalance: user.creditsBalance,
+        plan: user.plan,
+        planMonthlyCredits: user.planMonthlyCredits,
       },
       apiKey: rawApiKey // Only show raw key once
     });
@@ -97,6 +104,8 @@ const login = async (req, res) => {
         email: user.email,
         name: user.name,
         creditsBalance: user.creditsBalance,
+        plan: user.plan,
+        planMonthlyCredits: user.planMonthlyCredits,
       },
     });
   } catch (error) {
@@ -114,6 +123,8 @@ const getMe = async (req, res) => {
         email: true,
         name: true,
         creditsBalance: true,
+        plan: true,
+        planMonthlyCredits: true,
         createdAt: true,
       }
     });
@@ -135,14 +146,25 @@ const googleAuth = async (req, res) => {
 
     let payload;
     try {
-      const axios = require('axios');
-      const { data } = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
-        headers: { Authorization: `Bearer ${credential}` }
-      });
-      payload = data;
+      const isLikelyJwt = credential.split('.').length === 3;
+      if (isLikelyJwt) {
+        if (!process.env.GOOGLE_CLIENT_ID) {
+          return res.status(500).json({ error: 'Server misconfiguration: GOOGLE_CLIENT_ID not set' });
+        }
+        const ticket = await googleClient.verifyIdToken({
+          idToken: credential,
+          audience: process.env.GOOGLE_CLIENT_ID,
+        });
+        payload = ticket.getPayload();
+      } else {
+        const axios = require('axios');
+        const { data } = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${credential}` }
+        });
+        payload = data;
+      }
     } catch (e) {
-      // Fallback for mock tokens in dev
-      payload = jwt.decode(credential);
+      return res.status(400).json({ error: 'Invalid Google token' });
     }
 
     if (!payload || !payload.email) {
@@ -167,6 +189,9 @@ const googleAuth = async (req, res) => {
           email,
           passwordHash,
           name: name || email.split('@')[0],
+          creditsBalance: FIRST_MONTH_CREDITS,
+          plan: 'FREE',
+          planMonthlyCredits: DEFAULT_MONTHLY_CREDITS,
         },
       });
 
@@ -195,6 +220,8 @@ const googleAuth = async (req, res) => {
         email: user.email,
         name: user.name,
         creditsBalance: user.creditsBalance,
+        plan: user.plan,
+        planMonthlyCredits: user.planMonthlyCredits,
         picture,
       },
       ...(isNewUser && { apiKey: newApiKey })
@@ -205,9 +232,28 @@ const googleAuth = async (req, res) => {
   }
 };
 
+const updateMe = async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Name is required' });
+    }
+    const updatedUser = await prisma.user.update({
+      where: { id: req.userId },
+      data: { name: name.trim() },
+      select: { id: true, email: true, name: true, creditsBalance: true, plan: true, planMonthlyCredits: true },
+    });
+    res.json({ user: updatedUser });
+  } catch (error) {
+    console.error('UpdateMe error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 module.exports = {
   register,
   login,
   getMe,
+  updateMe,
   googleAuth,
 };

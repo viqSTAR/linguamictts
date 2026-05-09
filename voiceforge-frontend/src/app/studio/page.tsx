@@ -4,16 +4,15 @@ import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { 
-  Mic2, KeyRound, CreditCard, Settings, LogOut, 
-  Play, Download, Plus, Copy, Trash2, ChevronDown, Sparkles, Loader2, Wand2, SlidersHorizontal, Activity 
+  Mic2, CreditCard, Settings, LogOut, 
+  Download, ChevronDown, Sparkles, Loader2, Wand2, SlidersHorizontal, Activity 
 } from 'lucide-react';
 import api from '@/lib/api';
 
 const tabs = [
   { id: 'playground', label: 'Studio Playground', icon: Mic2 },
-  { id: 'api-keys',   label: 'API Keys',           icon: KeyRound },
-  { id: 'billing',   label: 'Usage & Billing',     icon: CreditCard },
-  { id: 'settings',  label: 'Settings',            icon: Settings },
+  { id: 'billing',    label: 'Usage & Billing',   icon: CreditCard },
+  { id: 'settings',  label: 'Settings',           icon: Settings },
 ];
 
 export default function Studio() {
@@ -122,9 +121,8 @@ export default function Studio() {
         <main className="p-8 max-w-5xl mx-auto w-full pb-20">
           <AnimatePresence mode="wait">
             {activeTab === 'playground' && <PlaygroundView key="playground" text={text} setText={setText} user={user} setUser={setUser} />}
-            {activeTab === 'api-keys'   && <ApiKeysView   key="api-keys" />}
-            {activeTab === 'billing'   && <BillingView   key="billing" user={user} />}
-            {activeTab === 'settings'  && <SettingsView  key="settings" user={user} setUser={setUser} />}
+            {activeTab === 'billing'    && <BillingView   key="billing"    user={user} />}
+            {activeTab === 'settings'  && <SettingsView  key="settings"   user={user} setUser={setUser} />}
           </AnimatePresence>
         </main>
       </div>
@@ -549,152 +547,268 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
   )
 }
 
-function ApiKeysView() {
-  const [keys, setKeys] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    api.get('/api-keys').then(res => {
-      setKeys(res.data.keys);
-      setLoading(false);
-    });
-  }, []);
-
-  const createKey = async () => {
-    try {
-      const res = await api.post('/api-keys', { name: `Key ${new Date().toLocaleDateString()}` });
-      setKeys([...keys, res.data.key]);
-      alert(`Save this key, it won't be shown again: ${res.data.rawApiKey}`);
-    } catch(e) {
-      alert("Failed to create key");
-    }
-  };
-
-  const deleteKey = async (id: string) => {
-    try {
-      await api.delete(`/api-keys/${id}`);
-      setKeys(keys.filter(k => k.id !== id));
-    } catch(e) {}
-  };
-
-  return (
-    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-semibold mb-2">API Keys</h1>
-          <p className="text-neutral-500">Manage your secret keys for authenticating API requests.</p>
-        </div>
-        <button onClick={createKey} className="bg-black text-white px-4 py-2.5 rounded-xl font-medium shadow-[0_4px_14px_0_rgba(0,0,0,0.1)] hover:bg-neutral-800 transition-all flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98]">
-          <Plus className="w-4 h-4" /> Create new key
-        </button>
-      </div>
-
-      <div className="bg-white border border-black/5 rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.03)] overflow-hidden">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-neutral-50/50 border-b border-black/5 text-xs uppercase tracking-wider text-neutral-500 font-semibold">
-              <th className="p-4 pl-6">Name</th>
-              <th className="p-4">Key Prefix</th>
-              <th className="p-4">Created</th>
-              <th className="p-4 pr-6 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="text-sm">
-            {loading ? (
-              <tr><td colSpan={4} className="p-8 text-center text-neutral-400">Loading keys...</td></tr>
-            ) : keys.length === 0 ? (
-              <tr><td colSpan={4} className="p-8 text-center text-neutral-400">No API keys found.</td></tr>
-            ) : keys.map(k => (
-              <tr key={k.id} className="border-b border-black/5 hover:bg-neutral-50/50 transition-colors group">
-                <td className="p-4 pl-6 font-medium text-neutral-900">{k.name}</td>
-                <td className="p-4 font-mono text-neutral-500">{k.prefix}••••••••••••••••</td>
-                <td className="p-4 text-neutral-500">{new Date(k.createdAt).toLocaleDateString()}</td>
-                <td className="p-4 pr-6 flex justify-end gap-2">
-                  <button onClick={() => deleteKey(k.id)} className="p-2 text-neutral-400 hover:text-red-600 bg-white border border-black/5 rounded-lg shadow-sm hover:shadow transition-all opacity-0 group-hover:opacity-100"><Trash2 className="w-4 h-4" /></button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="p-4 px-6 bg-orange-50/50 border-t border-orange-100 text-sm text-orange-800">
-          <span className="font-semibold">Security Note:</span> Actual secret keys are only shown once upon creation via the API.
-        </div>
-      </div>
-    </motion.div>
-  )
-}
+// Per-plan themes — mirrors the pricing page card aesthetics exactly
+const PLAN_THEMES: Record<string, {
+  // Hero banner
+  heroBg: string; heroBalanceText: string; heroSubText: string; heroAllocText: string;
+  heroBlobColor: string; glow: string;
+  // Badge (plan name tag)
+  badgeBg: string; badgeText: string;
+  // Progress bar
+  barFrom: string; barTo: string; trackBg: string;
+  // Plan card (left)
+  cardBg: string; cardBorder: string; cardAccent: string; cardText: string; cardSub: string;
+  // Usage card (right)
+  usageCardBg: string; usageCardBorder: string; usageAccent: string; usageText: string; usageSub: string;
+  // CTA button
+  ctaClass: string;
+  // Surplus banner
+  surplusBg: string; surplusBorder: string; surplusText: string;
+  // Remaining tag
+  remBg: string; remText: string;
+  icon: string; label: string; isDark: boolean; isPro?: boolean;
+}> = {
+  free: {
+    heroBg:           'bg-white border-emerald-200/70',
+    heroBalanceText:  'text-neutral-900',
+    heroSubText:      'text-neutral-500',
+    heroAllocText:    'text-emerald-700',
+    heroBlobColor:    'bg-emerald-400/20',
+    glow:             'shadow-[0_8px_40px_rgba(16,185,129,0.10)]',
+    badgeBg:          'bg-emerald-50',
+    badgeText:        'text-emerald-600',
+    barFrom:          'from-emerald-400', barTo: 'to-teal-400',
+    trackBg:          'bg-emerald-100/70',
+    cardBg:           'bg-white', cardBorder: 'border-black/5',
+    cardAccent:       'text-emerald-600', cardText: 'text-neutral-900', cardSub: 'text-neutral-400',
+    usageCardBg:      'bg-white', usageCardBorder: 'border-black/5',
+    usageAccent:      'text-emerald-600', usageText: 'text-neutral-900', usageSub: 'text-neutral-500',
+    ctaClass:         'bg-black text-white hover:bg-neutral-800',
+    surplusBg:        'bg-emerald-50', surplusBorder: 'border-emerald-200', surplusText: 'text-emerald-800',
+    remBg:            'bg-emerald-50', remText: 'text-emerald-700',
+    icon: '🌱', label: 'Free', isDark: false,
+  },
+  starter: {
+    // Vibrant coral-orange — bright and energetic, white card base
+    heroBg:           'bg-white border-orange-300/80',
+    heroBalanceText:  'text-neutral-900',
+    heroSubText:      'text-neutral-500',
+    heroAllocText:    'text-orange-500',
+    heroBlobColor:    'bg-orange-300/25',
+    glow:             'shadow-[0_8px_40px_rgba(251,146,60,0.20)] ring-2 ring-orange-200/70',
+    badgeBg:          'bg-orange-50',
+    badgeText:        'text-orange-500',
+    barFrom:          'from-orange-400', barTo: 'to-amber-300',
+    trackBg:          'bg-orange-100/60',
+    cardBg:           'bg-white', cardBorder: 'border-orange-200',
+    cardAccent:       'text-orange-500', cardText: 'text-neutral-900', cardSub: 'text-neutral-400',
+    usageCardBg:      'bg-white', usageCardBorder: 'border-orange-200/60',
+    usageAccent:      'text-orange-500', usageText: 'text-neutral-900', usageSub: 'text-neutral-500',
+    ctaClass:         'bg-orange-500 text-white hover:bg-orange-600',
+    surplusBg:        'bg-orange-50', surplusBorder: 'border-orange-200', surplusText: 'text-orange-800',
+    remBg:            'bg-orange-50', remText: 'text-orange-600',
+    icon: '🚀', label: 'Starter', isDark: false, isPro: false,
+  },
+  creator: {
+    // Dark/black card — exact match to the Creator pricing card
+    heroBg:           'bg-black border-black',
+    heroBalanceText:  'text-white',
+    heroSubText:      'text-neutral-400',
+    heroAllocText:    'text-orange-400',
+    heroBlobColor:    'bg-orange-500/20',
+    glow:             'shadow-[0_8px_40px_rgba(0,0,0,0.35)]',
+    badgeBg:          'bg-orange-500/20',
+    badgeText:        'text-orange-300',
+    barFrom:          'from-orange-500', barTo: 'to-amber-400',
+    trackBg:          'bg-white/10',
+    cardBg:           'bg-neutral-900', cardBorder: 'border-neutral-800',
+    cardAccent:       'text-orange-400', cardText: 'text-white', cardSub: 'text-neutral-400',
+    usageCardBg:      'bg-neutral-900', usageCardBorder: 'border-neutral-800',
+    usageAccent:      'text-orange-400', usageText: 'text-white', usageSub: 'text-neutral-400',
+    ctaClass:         'bg-gradient-to-r from-orange-500 to-amber-500 text-white hover:from-orange-600 hover:to-amber-600',
+    surplusBg:        'bg-orange-500/10', surplusBorder: 'border-orange-500/30', surplusText: 'text-orange-300',
+    remBg:            'bg-orange-500/20', remText: 'text-orange-300',
+    icon: '⚡', label: 'Creator', isDark: true,
+  },
+  pro: {
+    // Deep Orangish-Gold — luxury feel, distinct and more premium than starter
+    heroBg:           'bg-gradient-to-br from-orange-50 via-amber-50 to-orange-100/80 border-orange-300',
+    heroBalanceText:  'text-orange-900',
+    heroSubText:      'text-orange-800',
+    heroAllocText:    'text-orange-700',
+    heroBlobColor:    'bg-orange-500/25',
+    glow:             'shadow-[0_8px_60px_rgba(234,88,12,0.25)] ring-2 ring-orange-300/80',
+    badgeBg:          'bg-gradient-to-r from-orange-200 to-amber-200',
+    badgeText:        'text-orange-900',
+    barFrom:          'from-orange-600', barTo: 'to-amber-400',
+    trackBg:          'bg-orange-200/60',
+    cardBg:           'bg-gradient-to-br from-orange-50 to-amber-50', cardBorder: 'border-orange-300/70',
+    cardAccent:       'text-orange-700', cardText: 'text-orange-900', cardSub: 'text-orange-700/80',
+    usageCardBg:      'bg-gradient-to-br from-orange-50 to-amber-50', usageCardBorder: 'border-orange-300/70',
+    usageAccent:      'text-orange-700', usageText: 'text-orange-900', usageSub: 'text-orange-700/80',
+    ctaClass:         'bg-gradient-to-r from-orange-600 to-amber-500 text-white hover:from-orange-700 hover:to-amber-600 shadow-lg shadow-orange-500/25',
+    surplusBg:        'bg-orange-100', surplusBorder: 'border-orange-300', surplusText: 'text-orange-900',
+    remBg:            'bg-orange-200/70', remText: 'text-orange-900',
+    icon: '👑', label: 'Pro', isDark: false, isPro: true,
+  },
+};
 
 function BillingView({ user }: { user: any }) {
-  const planName = (user?.plan || 'FREE').toString().toLowerCase();
-  const planLabel = planName.charAt(0).toUpperCase() + planName.slice(1);
-  const monthlyAllocation = user?.planMonthlyCredits || 10000;
-  const balance = user?.creditsBalance || 0;
-  // Credits used from this month's allocation (clamped — top-ups can push balance above allocation)
-  const usedFromMonthly = Math.max(0, monthlyAllocation - balance);
-  const percent = Math.min(100, Math.max(0, (usedFromMonthly / monthlyAllocation) * 100));
-  const hasTopUpSurplus = balance > monthlyAllocation;
+  const planKey            = (user?.plan || 'FREE').toString().toLowerCase();
+  const theme              = PLAN_THEMES[planKey] || PLAN_THEMES.free;
+  const monthlyAllocation  = user?.planMonthlyCredits || 10000;
+  const balance            = user?.creditsBalance || 0;
+  const usedFromMonthly    = Math.max(0, monthlyAllocation - balance);
+  const percent            = Math.min(100, Math.max(0, (usedFromMonthly / monthlyAllocation) * 100));
+  const hasTopUpSurplus    = balance > monthlyAllocation;
+  const isPro              = theme.isPro === true;
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-      <div className="mb-8">
-        <h1 className="text-2xl font-semibold mb-2">Usage & Billing</h1>
-        <p className="text-neutral-500">Monitor your credit consumption and manage your plan.</p>
-      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      {/* ── Hero Banner ─────────────────────────────────────────────────── */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
+        className={`relative overflow-hidden rounded-3xl border p-8 mb-7 ${theme.heroBg} ${theme.glow}`}
+      >
+        {/* Primary glow blob */}
+        <div className={`absolute -top-12 -right-12 w-64 h-64 rounded-full blur-3xl pointer-events-none ${theme.heroBlobColor}`} />
+
+        {/* Pro-only: second animated rotating blob + sparkles */}
+        {isPro && (
+          <>
+            <motion.div
+              animate={{ rotate: 360, scale: [1, 1.15, 1] }}
+              transition={{ rotate: { duration: 12, repeat: Infinity, ease: 'linear' }, scale: { duration: 3, repeat: Infinity, ease: 'easeInOut' } }}
+              className="absolute -bottom-16 -left-16 w-56 h-56 rounded-full bg-orange-500/20 blur-3xl pointer-events-none"
+            />
+            {/* Floating sparkle dots */}
+            {[...Array(6)].map((_, i) => (
+              <motion.div
+                key={i}
+                animate={{ y: [0, -14, 0], opacity: [0.3, 1, 0.3], scale: [1, 1.2, 1] }}
+                transition={{ duration: 2 + i * 0.4, repeat: Infinity, delay: i * 0.3, ease: 'easeInOut' }}
+                className="absolute w-1.5 h-1.5 rounded-full bg-gradient-to-br from-orange-300 to-amber-400 shadow-[0_0_8px_2px_rgba(249,115,22,0.6)] pointer-events-none"
+                style={{ left: `${12 + i * 16}%`, top: `${15 + (i % 2) * 35}%` }}
+              />
+            ))}
+          </>
+        )}
+
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-8">
+          {/* Left: balance */}
+          <div>
+            <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-widest mb-5 ${theme.badgeBg} ${theme.badgeText}`}>
+              {isPro ? (
+                <motion.span animate={{ rotate: [-8, 8, -8] }} transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}>
+                  {theme.icon}
+                </motion.span>
+              ) : <span>{theme.icon}</span>}
+              {theme.label} Plan
+              {isPro && <span className="ml-1.5 text-[9px] bg-gradient-to-r from-orange-500 to-amber-500 text-white px-1.5 py-0.5 rounded-full shadow-sm">PREMIUM</span>}
+            </div>
+            <motion.div
+              className={`text-6xl font-extrabold tracking-tight mb-1 ${theme.heroBalanceText}`}
+              animate={isPro ? { textShadow: ['0 0 0px rgba(234,88,12,0)', '0 0 20px rgba(234,88,12,0.4)', '0 0 0px rgba(234,88,12,0)'] } : {}}
+              transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+            >
+              {balance.toLocaleString()}
+            </motion.div>
+            <p className={`text-sm font-medium ${theme.heroSubText}`}>credits remaining</p>
+          </div>
+
+          {/* Right: allocation + mini progress */}
+          <div className="flex flex-col gap-3 min-w-[220px]">
+            <div className={`text-[11px] font-bold uppercase tracking-widest ${theme.heroSubText}`}>Monthly Allocation</div>
+            <div className={`text-3xl font-bold ${theme.heroAllocText}`}>{monthlyAllocation.toLocaleString()}</div>
+            <div className={`h-2.5 rounded-full overflow-hidden w-full ${theme.trackBg}`}>
+              <motion.div
+                initial={{ width: 0 }} animate={{ width: `${percent}%` }} transition={{ duration: 1, ease: 'easeOut' }}
+                className={`h-full rounded-full bg-gradient-to-r ${theme.barFrom} ${theme.barTo}`}
+              />
+            </div>
+            <p className={`text-xs ${theme.heroSubText}`}>{usedFromMonthly.toLocaleString()} used · resets monthly</p>
+          </div>
+        </div>
+      </motion.div>
+
+      {/* ── Plan + Usage Cards ───────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+
         {/* Plan Card */}
-        <div className="bg-white border border-black/5 rounded-2xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.03)] flex flex-col justify-between">
-          <div className="flex items-center gap-2 text-sm font-semibold text-neutral-500 uppercase tracking-wider mb-6">
+        <motion.div
+          initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
+          className={`rounded-2xl border p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)] flex flex-col justify-between ${theme.cardBg} ${theme.cardBorder}`}
+        >
+          <div className={`flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest mb-6 ${theme.cardAccent}`}>
             <CreditCard className="w-4 h-4" /> Current Plan
           </div>
           <div>
-            <h2 className="text-3xl font-semibold mb-1">{planLabel} Plan</h2>
-            <p className="text-neutral-500 text-sm">{monthlyAllocation.toLocaleString()} credits / month</p>
-            {planName === 'free' && (
-              <p className="text-xs text-orange-600 font-semibold mt-2">12,000 credits bonus first month</p>
+            <div className={`text-3xl font-bold mb-1 ${theme.cardText}`}>{theme.icon} {theme.label}</div>
+            <p className={`text-sm ${theme.cardSub}`}>{monthlyAllocation.toLocaleString()} credits / month</p>
+            {planKey === 'free' && (
+              <p className={`text-xs font-semibold mt-2 ${theme.cardAccent}`}>12,000 credits bonus first month</p>
             )}
           </div>
-          <Link href="/pricing" className="mt-8 w-full py-2.5 bg-orange-50 text-orange-600 font-semibold rounded-xl hover:bg-orange-100 transition-colors border border-orange-100 shadow-sm text-center block">
-            {planName === 'free' ? 'Upgrade Plan →' : 'Change Plan →'}
+          <Link
+            href="/pricing"
+            className={`mt-6 w-full py-2.5 font-semibold rounded-xl transition-all text-center block text-sm ${theme.ctaClass}`}
+          >
+            {planKey === 'free' ? 'Upgrade Plan →' : 'Change Plan →'}
           </Link>
-        </div>
+        </motion.div>
 
-        {/* Usage Meter */}
-        <div className="bg-white border border-black/5 rounded-2xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.03)] md:col-span-2">
-          <div className="flex items-center justify-between mb-6">
-            <div className="text-sm font-semibold text-neutral-500 uppercase tracking-wider">Credits Usage</div>
-            <div className="text-sm font-medium text-neutral-500 bg-neutral-100 px-3 py-1 rounded-full">Resets monthly</div>
+        {/* Usage Meter Card */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
+          className={`rounded-2xl border p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)] md:col-span-2 ${theme.usageCardBg} ${theme.usageCardBorder}`}
+        >
+          <div className="flex items-center justify-between mb-5">
+            <div className={`text-[11px] font-bold uppercase tracking-widest ${theme.usageAccent}`}>Credits Usage</div>
+            <div className={`text-[11px] font-medium px-3 py-1 rounded-full ${theme.isDark ? 'bg-white/10 text-neutral-400' : 'bg-neutral-100 text-neutral-400'}`}>
+              Resets monthly
+            </div>
           </div>
 
-          {/* Current balance hero */}
-          <div className="flex items-end gap-2 mb-6">
-            <span className="text-5xl font-bold text-neutral-900">{balance.toLocaleString()}</span>
-            <span className="text-neutral-500 mb-1">credits remaining</span>
+          <div className={`text-5xl font-extrabold mb-1 ${theme.usageText}`}>{balance.toLocaleString()}</div>
+          <p className={`text-sm mb-5 ${theme.usageSub}`}>credits left</p>
+
+          {/* Progress bar */}
+          <div className="space-y-2 mb-4">
+            <div className={`flex justify-between text-xs ${theme.usageSub}`}>
+              <span>{usedFromMonthly.toLocaleString()} used</span>
+              <span>{monthlyAllocation.toLocaleString()} total</span>
+            </div>
+            <div className={`h-4 rounded-full w-full overflow-hidden shadow-inner ${theme.trackBg}`}>
+              <motion.div
+                initial={{ width: 0 }} animate={{ width: `${percent}%` }} transition={{ duration: 1.2, ease: 'easeOut' }}
+                className={`h-full rounded-full bg-gradient-to-r ${theme.barFrom} ${theme.barTo} relative`}
+              >
+                {percent > 6 && (
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-white text-[9px] font-black">{Math.round(percent)}%</span>
+                )}
+              </motion.div>
+            </div>
           </div>
 
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-neutral-500">{usedFromMonthly.toLocaleString()} used from monthly allocation</span>
-              <span className="text-neutral-400">{monthlyAllocation.toLocaleString()} / mo</span>
-            </div>
-            <div className="h-3 bg-neutral-100 rounded-full w-full overflow-hidden shadow-inner">
-              <div
-                className="h-full bg-gradient-to-r from-orange-400 to-amber-400 rounded-full transition-all duration-1000"
-                style={{ width: `${percent}%` }}
-              />
-            </div>
+          {/* Remaining tag */}
+          <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold ${theme.remBg} ${theme.remText}`}>
+            {theme.icon} {Math.round(100 - percent)}% of {theme.label} plan remaining
           </div>
 
           {hasTopUpSurplus && (
-            <div className="mt-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 font-medium">
-              ✨ You have <strong>{(balance - monthlyAllocation).toLocaleString()}</strong> bonus credits from top-ups above your plan limit.
+            <div className={`mt-4 px-4 py-3 rounded-xl text-sm font-medium border ${theme.surplusBg} ${theme.surplusBorder} ${theme.surplusText}`}>
+              ✨ <strong>{(balance - monthlyAllocation).toLocaleString()}</strong> bonus credits from top-ups above your plan limit.
             </div>
           )}
-        </div>
+        </motion.div>
       </div>
     </motion.div>
-  )
+  );
 }
+
+
 
 function SettingsView({ user, setUser }: { user: any, setUser: any }) {
   const [name, setName] = useState(user?.name || '');

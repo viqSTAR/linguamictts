@@ -365,36 +365,8 @@ export default function Pricing() {
                       </div>
                     </div>
 
-                    {/* Dummy Payment Form */}
-                    <div className="text-left mb-6">
-                      <div className="flex gap-2 mb-4 p-1 bg-neutral-100 rounded-xl">
-                        <button className="flex-1 py-2 text-sm font-semibold bg-white rounded-lg shadow-sm border border-black/5 text-neutral-900">Credit Card</button>
-                        <button className="flex-1 py-2 text-sm font-semibold text-neutral-500 hover:text-neutral-700">UPI / Netbanking</button>
-                      </div>
-                      <div className="space-y-4">
-                        <div>
-                          <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">Cardholder Name</label>
-                          <input type="text" defaultValue="John Doe" className="w-full h-11 px-4 rounded-xl border border-neutral-200 bg-neutral-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all" />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">Card Number</label>
-                          <div className="relative">
-                            <input type="text" defaultValue="4242 4242 4242 4242" className="w-full h-11 pl-10 pr-4 rounded-xl border border-neutral-200 bg-neutral-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all" />
-                            <CreditCard className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                          </div>
-                        </div>
-                        <div className="flex gap-4">
-                          <div className="flex-1">
-                            <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">Expiry</label>
-                            <input type="text" defaultValue="12/25" className="w-full h-11 px-4 rounded-xl border border-neutral-200 bg-neutral-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all" />
-                          </div>
-                          <div className="flex-1">
-                            <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">CVC</label>
-                            <input type="password" defaultValue="123" maxLength={3} className="w-full h-11 px-4 rounded-xl border border-neutral-200 bg-neutral-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all" />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                    {/* Dummy Payment Form — tabbed */}
+                    <PaymentFormMock />
 
                     <div className="flex justify-between items-center pt-4 border-t border-black/5 mb-6">
                       <span className="text-neutral-900 font-semibold">
@@ -465,6 +437,131 @@ export default function Pricing() {
           </div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+// ─── Mock Payment Form Component ─────────────────────────────────────────────
+function PaymentFormMock() {
+  const [tab, setTab] = useState<'card' | 'upi'>('card');
+  const [upiId, setUpiId] = useState('demo@upi');
+  const [bank, setBank] = useState('sbi');
+
+  return (
+    <div className="text-left mb-6">
+      {/* Tab Switcher */}
+      <div className="flex gap-2 mb-5 p-1 bg-neutral-100 rounded-xl">
+        <button
+          type="button"
+          onClick={() => setTab('card')}
+          className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${
+            tab === 'card'
+              ? 'bg-white shadow-sm border border-black/5 text-neutral-900'
+              : 'text-neutral-500 hover:text-neutral-700'
+          }`}
+        >
+          Credit Card
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('upi')}
+          className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${
+            tab === 'upi'
+              ? 'bg-white shadow-sm border border-black/5 text-neutral-900'
+              : 'text-neutral-500 hover:text-neutral-700'
+          }`}
+        >
+          UPI / Netbanking
+        </button>
+      </div>
+
+      {/* Credit Card Form */}
+      {tab === 'card' && (
+        <motion.div
+          key="card"
+          initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.18 }}
+          className="space-y-4"
+        >
+          <div>
+            <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">Cardholder Name</label>
+            <input type="text" defaultValue="John Doe" className="w-full h-11 px-4 rounded-xl border border-neutral-200 bg-neutral-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all" />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">Card Number</label>
+            <div className="relative">
+              <input type="text" defaultValue="4242 4242 4242 4242" className="w-full h-11 pl-10 pr-4 rounded-xl border border-neutral-200 bg-neutral-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all" />
+              <CreditCard className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            </div>
+          </div>
+          <div className="flex gap-4">
+            <div className="flex-1">
+              <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">Expiry</label>
+              <input type="text" defaultValue="12/25" className="w-full h-11 px-4 rounded-xl border border-neutral-200 bg-neutral-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all" />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">CVC</label>
+              <input type="password" defaultValue="123" maxLength={3} className="w-full h-11 px-4 rounded-xl border border-neutral-200 bg-neutral-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all" />
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {/* UPI / Netbanking Form */}
+      {tab === 'upi' && (
+        <motion.div
+          key="upi"
+          initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.18 }}
+          className="space-y-4"
+        >
+          {/* UPI ID */}
+          <div>
+            <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">UPI ID</label>
+            <div className="relative">
+              <input
+                type="text"
+                value={upiId}
+                onChange={e => setUpiId(e.target.value)}
+                placeholder="yourname@upi"
+                className="w-full h-11 px-4 rounded-xl border border-neutral-200 bg-neutral-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+              />
+            </div>
+            <p className="text-[11px] text-neutral-400 mt-1.5">e.g. name@okicici, name@ybl, name@paytm</p>
+          </div>
+
+          {/* Netbanking Bank Picker */}
+          <div>
+            <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">Or pay via Netbanking</label>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: 'sbi',  label: 'SBI',   color: 'bg-blue-50 border-blue-200 text-blue-800'   },
+                { id: 'hdfc', label: 'HDFC',  color: 'bg-red-50 border-red-200 text-red-800'       },
+                { id: 'icici',label: 'ICICI', color: 'bg-orange-50 border-orange-200 text-orange-800' },
+                { id: 'axis', label: 'Axis',  color: 'bg-purple-50 border-purple-200 text-purple-800' },
+                { id: 'kotak',label: 'Kotak', color: 'bg-red-50 border-red-200 text-red-700'       },
+                { id: 'other',label: 'Other', color: 'bg-neutral-50 border-neutral-200 text-neutral-700' },
+              ].map(b => (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => setBank(b.id)}
+                  className={`py-2.5 rounded-xl border text-xs font-bold transition-all ${
+                    bank === b.id
+                      ? b.color + ' ring-2 ring-offset-1 ring-orange-400/60 scale-[1.03]'
+                      : 'bg-white border-neutral-200 text-neutral-600 hover:border-orange-300'
+                  }`}
+                >
+                  {b.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-xl">
+            <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
+            <p className="text-xs text-amber-800 font-medium">Demo mode — no real transaction will occur.</p>
+          </div>
+        </motion.div>
+      )}
     </div>
   );
 }

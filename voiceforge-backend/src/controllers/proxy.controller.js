@@ -1,5 +1,11 @@
 const axios = require('axios');
 const prisma = require('../utils/prisma');
+const { spawn } = require('child_process');
+const fs = require('fs/promises');
+const os = require('os');
+const path = require('path');
+const ffmpegPath = require('ffmpeg-static');
+const { r2Enabled, buildAudioKey, uploadAudioBuffer, deleteAudioObject } = require('../utils/r2');
 
 const FASTAPI_URL = process.env.FASTAPI_URL || 'http://localhost:8000';
 const FASTAPI_INTERNAL_KEY = process.env.FASTAPI_INTERNAL_KEY || 'default_dev_key';
@@ -99,6 +105,37 @@ const deductCreditsAndLog = async ({
   });
 
   return result;
+};
+
+const convertWavToMp3 = async (wavBuffer) => {
+  if (!ffmpegPath) return null;
+
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'linguamic-'));
+  const wavPath = path.join(tmpDir, 'input.wav');
+  const mp3Path = path.join(tmpDir, 'output.mp3');
+
+  try {
+    await fs.writeFile(wavPath, wavBuffer);
+
+    await new Promise((resolve, reject) => {
+      const ff = spawn(ffmpegPath, ['-y', '-i', wavPath, '-codec:a', 'libmp3lame', '-qscale:a', '2', mp3Path]);
+      let errBuffer = '';
+
+      ff.stderr.on('data', (data) => {
+        errBuffer += data.toString();
+      });
+
+      ff.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(errBuffer || 'ffmpeg conversion failed'));
+      });
+    });
+
+    const mp3Buffer = await fs.readFile(mp3Path);
+    return mp3Buffer;
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
 };
 
 const proxyTTS = async (req, res) => {
@@ -293,6 +330,49 @@ const proxyStudioTTS = async (req, res) => {
     }
     res.setHeader('Transfer-Encoding', 'chunked');
     res.setHeader('Cache-Control', 'no-cache');
+    const audioChunks = [];
+    response.data.on('data', (chunk) => {
+      audioChunks.push(chunk);
+    });
+
+    response.data.on('end', async () => {
+      if (!r2Enabled) return;
+      try {
+        const buffer = Buffer.concat(audioChunks);
+        const newKey = buildAudioKey(req.userId, 'wav');
+        const uploadResult = await uploadAudioBuffer({ buffer, key: newKey, contentType: 'audio/wav' });
+
+        let mp3Key = null;
+        let mp3Url = null;
+        const mp3Buffer = await convertWavToMp3(buffer);
+        if (mp3Buffer) {
+          mp3Key = buildAudioKey(req.userId, 'mp3');
+          const mp3Result = await uploadAudioBuffer({ buffer: mp3Buffer, key: mp3Key, contentType: 'audio/mpeg' });
+          mp3Url = mp3Result.publicUrl;
+        }
+
+        await prisma.user.update({
+          where: { id: req.userId },
+          data: {
+            lastAudioKey: newKey,
+            lastAudioUrl: uploadResult.publicUrl,
+            lastAudioUpdatedAt: new Date(),
+            lastAudioMp3Key: mp3Key,
+            lastAudioMp3Url: mp3Url,
+          },
+        });
+
+        if (user.lastAudioKey) {
+          await deleteAudioObject(user.lastAudioKey);
+        }
+        if (user.lastAudioMp3Key) {
+          await deleteAudioObject(user.lastAudioMp3Key);
+        }
+      } catch (err) {
+        console.error('R2 upload error:', err.message);
+      }
+    });
+
     response.data.pipe(res);
   } catch (error) {
     console.error('Studio TTS Error:', error.message);

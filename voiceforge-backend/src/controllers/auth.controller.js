@@ -129,6 +129,8 @@ const getMe = async (req, res) => {
         plan: true,
         planMonthlyCredits: true,
         createdAt: true,
+        lastAudioUrl: true,
+        lastAudioMp3Url: true,
       }
     });
     

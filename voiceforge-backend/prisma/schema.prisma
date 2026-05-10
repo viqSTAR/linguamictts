@@ -13,6 +13,11 @@ model User {
   name               String?
   creditsBalance     Int                 @default(12000)
   addonCredits       Int                 @default(0)
+  lastAudioKey       String?
+  lastAudioUrl       String?
+  lastAudioUpdatedAt DateTime?
+  lastAudioMp3Key    String?
+  lastAudioMp3Url    String?
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   plan               PlanTier            @default(FREE)

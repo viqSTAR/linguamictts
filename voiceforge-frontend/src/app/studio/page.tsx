@@ -158,6 +158,9 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
   const [generating, setGenerating] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [cloudWavUrl, setCloudWavUrl] = useState<string | null>(null);
+  const [cloudMp3Url, setCloudMp3Url] = useState<string | null>(null);
+  const [cloudReady, setCloudReady] = useState(false);
   
   // STT State
   const [sttMode, setSttMode] = useState<'tts' | 'stt'>('tts');
@@ -276,6 +279,9 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
     setGenerating(true);
     setIsPlaying(true);
     setAudioUrl(null);
+    setCloudWavUrl(null);
+    setCloudMp3Url(null);
+    setCloudReady(false);
     
     // Initialize Audio Context for streaming playback
     if (!audioContextRef.current) {
@@ -422,6 +428,7 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
       
       const blobUrl = URL.createObjectURL(new Blob([buffer], { type: 'audio/wav' }));
       setAudioUrl(blobUrl);
+      await refreshCloudUrls();
 
     } catch (err) {
       console.error('Generation failed', err);
@@ -435,6 +442,34 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
       } else {
         setIsPlaying(false);
       }
+    }
+  };
+
+  const refreshCloudUrls = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    const attemptFetch = async () => {
+      const res = await api.get('/auth/me');
+      const nextWav = res.data.user?.lastAudioUrl || null;
+      const nextMp3 = res.data.user?.lastAudioMp3Url || null;
+      if (nextWav || nextMp3) {
+        setCloudWavUrl(nextWav);
+        setCloudMp3Url(nextMp3);
+        setCloudReady(true);
+        return true;
+      }
+      return false;
+    };
+
+    for (let i = 0; i < 3; i += 1) {
+      try {
+        const ok = await attemptFetch();
+        if (ok) break;
+      } catch {
+        // ignore retry errors
+      }
+      await new Promise((resolve) => setTimeout(resolve, 800));
     }
   };
 
@@ -772,11 +807,28 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
                     <div className="flex-1 w-full">
                       <audio controls src={audioUrl} className="w-full h-12 rounded-lg" />
                     </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <a href={audioUrl} download="linguamic-audio.wav" className="bg-orange-500 text-white flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold shadow-[0_4px_14px_rgba(249,115,22,0.3)] hover:bg-orange-600 transition-all hover:scale-[1.02] active:scale-[0.98]">
-                      <Download className="w-4 h-4" /> Download
+                  <div className="flex flex-col md:flex-row items-center gap-3 shrink-0">
+                    <a
+                      href={cloudWavUrl || audioUrl}
+                      download="linguamic-audio.wav"
+                      className="bg-orange-500 text-white flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold shadow-[0_4px_14px_rgba(249,115,22,0.3)] hover:bg-orange-600 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                    >
+                      <Download className="w-4 h-4" /> Download WAV
+                    </a>
+                    <a
+                      href={cloudMp3Url || '#'}
+                      download="linguamic-audio.mp3"
+                      className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.12)] transition-all ${cloudMp3Url ? 'bg-neutral-900 text-white hover:bg-neutral-800' : 'bg-neutral-200 text-neutral-400 cursor-not-allowed'}`}
+                      onClick={(event) => {
+                        if (!cloudMp3Url) event.preventDefault();
+                      }}
+                    >
+                      <Download className="w-4 h-4" /> Download MP3
                     </a>
                   </div>
+                  {!cloudReady && (
+                    <p className="text-[10px] text-neutral-400 mt-3">Cloud download links will appear shortly.</p>
+                  )}
                 </div>
               </div>
             ) : isPlaying ? (

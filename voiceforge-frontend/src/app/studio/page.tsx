@@ -8,7 +8,7 @@ import logo from '@/assets/linguamicorange copy.png';
 import { 
   Mic2, CreditCard, Settings, LogOut, 
   Download, ChevronDown, Sparkles, Loader2, Wand2, SlidersHorizontal, Activity,
-  User
+  User, CheckCircle2
 } from 'lucide-react';
 import api from '@/lib/api';
 

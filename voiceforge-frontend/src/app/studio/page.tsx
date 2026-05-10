@@ -35,6 +35,11 @@ type CreditTransaction = {
   createdAt: string;
 };
 
+type RefundModalState = {
+  open: boolean;
+  step: 'confirm' | 'submitted';
+};
+
 export default function Studio() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('playground');
@@ -1118,6 +1123,8 @@ function BillingView({ user }: { user: UserProfile | null }) {
 
   const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
   const [txLoading, setTxLoading] = useState(true);
+  const [autoPayEnabled, setAutoPayEnabled] = useState(true);
+  const [refundModal, setRefundModal] = useState<RefundModalState>({ open: false, step: 'confirm' });
 
   useEffect(() => {
     let isMounted = true;
@@ -1283,6 +1290,40 @@ function BillingView({ user }: { user: UserProfile | null }) {
         initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
         className={`mt-6 rounded-2xl border p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ${theme.usageCardBg} ${theme.usageCardBorder}`}
       >
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+          <div>
+            <div className={`text-[11px] font-bold uppercase tracking-widest ${theme.usageAccent}`}>Auto-Pay</div>
+            <p className={`text-sm ${theme.usageSub}`}>Toggle auto-renewal for your subscription.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAutoPayEnabled((prev) => !prev)}
+            className={`h-11 px-4 rounded-full font-semibold text-sm border transition-all ${
+              autoPayEnabled
+                ? 'bg-orange-500 text-white border-orange-500 hover:bg-orange-600'
+                : 'bg-neutral-100 text-neutral-500 border-neutral-200 hover:bg-neutral-200'
+            }`}
+          >
+            {autoPayEnabled ? 'Auto-Pay On' : 'Auto-Pay Off'}
+          </button>
+        </div>
+
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+          <div>
+            <div className={`text-[11px] font-bold uppercase tracking-widest ${theme.usageAccent}`}>Cancel Plan</div>
+            <p className={`text-sm ${theme.usageSub}`}>Cancel your subscription renewal at the end of the billing cycle.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setRefundModal({ open: true, step: 'confirm' })}
+            className="h-11 px-4 rounded-full font-semibold text-sm border border-red-200 text-red-600 hover:bg-red-50 transition-all"
+          >
+            Request Refund
+          </button>
+        </div>
+
+        <div className="h-px w-full bg-black/5 mb-6" />
+
         <div className="flex items-center justify-between mb-4">
           <div className={`text-[11px] font-bold uppercase tracking-widest ${theme.usageAccent}`}>Transaction History</div>
           <div className={`text-[11px] font-medium px-3 py-1 rounded-full ${theme.isDark ? 'bg-white/10 text-neutral-400' : 'bg-neutral-100 text-neutral-400'}`}>
@@ -1313,6 +1354,78 @@ function BillingView({ user }: { user: UserProfile | null }) {
           </div>
         )}
       </motion.div>
+
+      <AnimatePresence>
+        {refundModal.open && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.92, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: 20 }}
+              transition={{ type: 'spring', bounce: 0.25, duration: 0.4 }}
+              className="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-md border border-black/5"
+            >
+              {refundModal.step === 'confirm' ? (
+                <>
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center border border-orange-100">
+                      <CreditCard className="w-5 h-5 text-orange-500" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-neutral-900">Refund request</h4>
+                      <p className="text-xs text-neutral-400">Confirm you want to request a refund.</p>
+                    </div>
+                  </div>
+                  <p className="text-sm text-neutral-600 mb-6">
+                    Refunds are only possible if cancelled within 24 hours and less than 5,000 credits are used.
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setRefundModal({ open: false, step: 'confirm' })}
+                      className="flex-1 py-3 rounded-2xl border border-black/10 text-sm font-semibold text-neutral-600 hover:bg-neutral-50 transition-all"
+                    >
+                      Keep subscription
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRefundModal({ open: true, step: 'submitted' })}
+                      className="flex-1 py-3 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-500 text-white text-sm font-semibold shadow-[0_6px_18px_rgba(249,115,22,0.3)] transition-all"
+                    >
+                      Confirm refund
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 bg-green-50 rounded-xl flex items-center justify-center border border-green-100">
+                      <CheckCircle2 className="w-5 h-5 text-green-600" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-neutral-900">Request submitted</h4>
+                      <p className="text-xs text-neutral-400">Our team will review your eligibility.</p>
+                    </div>
+                  </div>
+                  <p className="text-sm text-neutral-600 mb-6">
+                    We will email you if the refund is approved.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setRefundModal({ open: false, step: 'confirm' })}
+                    className="w-full py-3 rounded-2xl bg-black text-white text-sm font-semibold hover:bg-neutral-800 transition-all"
+                  >
+                    Close
+                  </button>
+                </>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

@@ -1,15 +1,17 @@
-# Starts ngrok and exposes the local VoiceForge API to a public URL
-# This is useful for testing with frontend apps or webhooks before deployment
+# Starts ngrok with a STATIC domain — URL never changes between restarts
+# Get your free static domain at: https://dashboard.ngrok.com/domains
 
+# ─── SET YOUR STATIC DOMAIN HERE ───────────────────────────────────────────────
+$staticDomain = "overcaptious-noelle-malarian.ngrok-free.dev"
 $port = 8000
-Write-Host "Starting ngrok on port $port..." -ForegroundColor Cyan
-Write-Host "Make sure your FastAPI server or Docker container is running on port $port" -ForegroundColor Yellow
+# ────────────────────────────────────────────────────────────────────────────────
 
-# Check if ngrok is installed
+Write-Host "Starting ngrok tunnel..." -ForegroundColor Cyan
+Write-Host "Public URL: https://$staticDomain" -ForegroundColor Green
+Write-Host "Make sure Docker container (voiceforge-api) is running on port $port" -ForegroundColor Yellow
+
 if (Get-Command ngrok -ErrorAction SilentlyContinue) {
-    ngrok http $port
+    ngrok http $port --domain=$staticDomain
 } else {
-    Write-Host "`nERROR: ngrok is not installed or not in PATH." -ForegroundColor Red
-    Write-Host "Please install it from https://ngrok.com/download or via winget:"
-    Write-Host "  winget install ngrok.ngrok"
+    Write-Host "`nERROR: ngrok not found. Install via: winget install ngrok.ngrok" -ForegroundColor Red
 }

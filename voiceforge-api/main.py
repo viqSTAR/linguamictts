@@ -10,6 +10,21 @@ from datetime import datetime
 import os
 import gguf_orpheus as _gguf_orpheus_module
 from gguf_orpheus import generate_speech_from_api, AVAILABLE_VOICES, SAMPLE_RATE
+from fastapi import UploadFile, File
+import tempfile
+
+# ---------------- STT GLOBALS ---------------- #
+try:
+    import faster_whisper
+    import torch
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    compute_type = "float16" if device == "cuda" else "int8"
+    whisper_model = faster_whisper.WhisperModel("base", device=device, compute_type=compute_type)
+    print(f"[Whisper] Loaded base model on {device} ({compute_type})")
+except Exception as e:
+    print(f"[Whisper] Error loading model: {e}")
+    whisper_model = None
+
 
 # Fix: Override hardcoded 127.0.0.1 so Docker can reach LM Studio on the host via host.docker.internal
 _lm_host = os.getenv("LM_STUDIO_HOST", "127.0.0.1")
@@ -215,3 +230,22 @@ def tts(req: TTSRequest):
             "Cache-Control": "no-cache"
         }
     )
+
+@app.post("/v1/stt")
+async def stt(file: UploadFile = File(...)):
+    if whisper_model is None:
+        raise HTTPException(500, "STT model not loaded")
+
+    if not file:
+        raise HTTPException(400, "No file uploaded")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
+
+    try:
+        segments, info = whisper_model.transcribe(tmp_path, beam_size=5)
+        text = " ".join([segment.text for segment in segments])
+        return {"text": text.strip(), "duration": info.duration}
+    finally:
+        os.unlink(tmp_path)

@@ -12,7 +12,7 @@ app.use(express.json());
 
 // Basic health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', message: 'VoiceForge Backend is running' });
+  res.json({ status: 'ok', message: 'Linguamic Backend is running' });
 });
 
 const rateLimit = require('express-rate-limit');
@@ -47,3 +47,4 @@ if (require.main === module) {
 }
 
 module.exports = app;
+

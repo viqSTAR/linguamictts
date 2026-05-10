@@ -3,9 +3,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
+import Image from 'next/image';
+import logo from '@/assets/linguamicorange copy.png';
 import { 
   Mic2, CreditCard, Settings, LogOut, 
-  Download, ChevronDown, Sparkles, Loader2, Wand2, SlidersHorizontal, Activity 
+  Download, ChevronDown, Sparkles, Loader2, Wand2, SlidersHorizontal, Activity,
+  User, Users
 } from 'lucide-react';
 import api from '@/lib/api';
 
@@ -60,10 +63,8 @@ export default function Studio() {
       <div className="w-64 border-r border-black/5 bg-white flex-col hidden md:flex">
         <div className="p-6">
           <Link href="/" className="inline-flex items-center gap-2 group w-fit">
-            <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-orange-500 to-amber-400 text-white shadow-lg flex items-center justify-center font-bold text-lg">
-              V
-            </span>
-            <span className="text-xl font-semibold tracking-tight">VoiceForge</span>
+            <Image src={logo} alt="Linguamic Logo" className="w-8 h-8 object-contain" />
+            <span className="text-xl font-semibold tracking-tight">Linguamic</span>
           </Link>
         </div>
 
@@ -136,6 +137,38 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   
+  // STT State
+  const [sttMode, setSttMode] = useState<'tts' | 'stt'>('tts');
+  const [sttFile, setSttFile] = useState<File | null>(null);
+  const [sttResult, setSttResult] = useState<string>('');
+
+  // Recording state
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
+  const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [vizBars, setVizBars] = useState<number[]>(Array(20).fill(4));
+
+  // Dropdown open state
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [toneOpen, setToneOpen] = useState(false);
+  const voiceRef = useRef<HTMLDivElement>(null);
+  const toneRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (voiceRef.current && !voiceRef.current.contains(e.target as Node)) setVoiceOpen(false);
+      if (toneRef.current && !toneRef.current.contains(e.target as Node)) setToneOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
   const audioContextRef = useRef<AudioContext | null>(null);
   const nextPlayTimeRef = useRef<number>(0);
 
@@ -154,8 +187,31 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
   };
 
   const EMOTIONS = ['giggle', 'laugh', 'chuckle', 'sigh', 'cough', 'sniffle', 'groan', 'yawn', 'gasp'];
-  const VOICES = ['tara', 'leo', 'leah', 'jessi', 'dan', 'mia', 'zac', 'zoe'];
-  const TONES = ['none', 'calm', 'romantic', 'storytelling', 'horror', 'angry', 'adventurous', 'excited', 'sad'];
+
+  const VOICE_META: Record<string, { emoji: string; gender: 'female' | 'male'; desc: string }> = {
+    tara:  { emoji: '👩‍🎤', gender: 'female', desc: 'Warm & expressive' },
+    leo:   { emoji: '🎙️', gender: 'male',   desc: 'Deep & confident' },
+    leah:  { emoji: '👩‍💼', gender: 'female', desc: 'Clear & professional' },
+    jessi: { emoji: '🌟', gender: 'female', desc: 'Bright & energetic' },
+    dan:   { emoji: '🧑‍🎤', gender: 'male',   desc: 'Smooth & mellow' },
+    mia:   { emoji: '🌸', gender: 'female', desc: 'Soft & friendly' },
+    zac:   { emoji: '⚡', gender: 'male',   desc: 'Bold & dynamic' },
+    zoe:   { emoji: '🦋', gender: 'female', desc: 'Light & playful' },
+  };
+  const VOICES = Object.keys(VOICE_META);
+
+  const TONE_META: Record<string, { emoji: string; desc: string }> = {
+    none:         { emoji: '🎯', desc: 'Natural' },
+    calm:         { emoji: '🌊', desc: 'Calm' },
+    romantic:     { emoji: '💝', desc: 'Romantic' },
+    storytelling: { emoji: '📖', desc: 'Story' },
+    horror:       { emoji: '🕯️', desc: 'Horror' },
+    angry:        { emoji: '🔥', desc: 'Angry' },
+    adventurous:  { emoji: '⚔️', desc: 'Adventure' },
+    excited:      { emoji: '🚀', desc: 'Excited' },
+    sad:          { emoji: '🌧️', desc: 'Sad' },
+  };
+  const TONES = Object.keys(TONE_META);
 
   const handleToneChange = (newTone: string) => {
     setTone(newTone === 'none' ? '' : newTone);
@@ -358,78 +414,342 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
     }
   };
 
+  const handleTranscribe = async (blobOverride?: Blob) => {
+    const source = blobOverride || (sttFile ? sttFile : null);
+    if (!source) return;
+    setGenerating(true);
+    setSttResult('');
+    setShowConfirm(false);
+
+    try {
+      const token = localStorage.getItem('token') || '';
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+      
+      const formData = new FormData();
+      const fileName = blobOverride ? 'recording.webm' : (sttFile as File).name;
+      formData.append('file', source, fileName);
+
+      const response = await fetch(`${API_URL}/v1/studio/stt`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formData
+      });
+
+      if (!response.ok) throw new Error('Server error: ' + response.status);
+      
+      const data = await response.json();
+      if (data.billing?.creditsRemaining !== undefined) {
+         setUser((prev: any) => ({ ...prev, creditsBalance: data.billing.creditsRemaining }));
+      }
+      if (data.text) setSttResult(data.text);
+    } catch (err) {
+      console.error('Transcription failed', err);
+      alert('Failed to transcribe audio. Check credits or backend status.');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: 48000,
+          channelCount: 1,
+        }
+      });
+      chunksRef.current = [];
+      const mr = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+      mediaRecorderRef.current = mr;
+
+      // Live visualizer via analyser
+      const ctx = new AudioContext();
+      const src = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 64;
+      src.connect(analyser);
+      const dataArr = new Uint8Array(analyser.frequencyBinCount);
+      const vizLoop = () => {
+        if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') return;
+        analyser.getByteFrequencyData(dataArr);
+        const bars = Array.from({ length: 20 }, (_, i) => {
+          const val = dataArr[Math.floor(i * (dataArr.length / 20))];
+          return Math.max(4, Math.round((val / 255) * 48));
+        });
+        setVizBars(bars);
+        requestAnimationFrame(vizLoop);
+      };
+      vizLoop();
+
+      mr.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      mr.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        ctx.close();
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        const url = URL.createObjectURL(blob);
+        setRecordedBlob(blob);
+        setRecordingUrl(url);
+        setShowConfirm(true);
+        setVizBars(Array(20).fill(4));
+      };
+
+      mr.start(250);
+      setIsRecording(true);
+      setRecordingTime(0);
+      timerRef.current = setInterval(() => setRecordingTime(t => t + 1), 1000);
+    } catch {
+      alert('Could not access microphone. Please allow microphone permission.');
+    }
+  };
+
+  const stopRecording = () => {
+    mediaRecorderRef.current?.stop();
+    setIsRecording(false);
+    if (timerRef.current) clearInterval(timerRef.current);
+  };
+
+  const formatTime = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-      <div className="mb-8">
-        <h1 className="text-3xl font-semibold mb-2 bg-gradient-to-br from-neutral-900 to-neutral-500 bg-clip-text text-transparent">Voice Studio</h1>
-        <p className="text-neutral-500">Design the perfect voiceover with emotion and precise tuning.</p>
+      <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-semibold mb-2 bg-gradient-to-br from-neutral-900 to-neutral-500 bg-clip-text text-transparent">Voice Studio</h1>
+          <p className="text-neutral-500">Design the perfect voiceover or transcribe audio with Whisper.</p>
+        </div>
+        <div className="flex bg-neutral-100 p-1.5 rounded-full w-fit shadow-inner border border-black/5 relative">
+          <button 
+            onClick={() => setSttMode('tts')}
+            className={`relative px-6 py-2.5 rounded-full text-sm font-semibold transition-colors z-10 ${sttMode === 'tts' ? 'text-white' : 'text-neutral-500 hover:text-neutral-700'}`}
+          >
+            {sttMode === 'tts' && (
+              <motion.div layoutId="modePill" className="absolute inset-0 bg-neutral-900 rounded-full shadow-md z-[-1]" transition={{ type: "spring", bounce: 0.2, duration: 0.5 }} />
+            )}
+            Text to Speech
+          </button>
+          <button 
+            onClick={() => setSttMode('stt')}
+            className={`relative px-6 py-2.5 rounded-full text-sm font-semibold transition-colors z-10 ${sttMode === 'stt' ? 'text-white' : 'text-neutral-500 hover:text-neutral-700'}`}
+          >
+            {sttMode === 'stt' && (
+              <motion.div layoutId="modePill" className="absolute inset-0 bg-neutral-900 rounded-full shadow-md z-[-1]" transition={{ type: "spring", bounce: 0.2, duration: 0.5 }} />
+            )}
+            Speech to Text
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <AnimatePresence mode="wait">
+        <motion.div 
+          key={sttMode}
+          initial={{ opacity: 0, y: 15, filter: 'blur(8px)' }}
+          animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+          exit={{ opacity: 0, y: -15, filter: 'blur(8px)' }}
+          transition={{ duration: 0.3, ease: 'easeInOut' }}
+          className={`grid grid-cols-1 ${sttMode === 'tts' ? 'lg:grid-cols-3' : 'lg:grid-cols-1 max-w-4xl mx-auto w-full'} gap-8`}
+        >
         
         {/* LEFT COLUMN: Editor & Output */}
-        <div className="lg:col-span-2 flex flex-col gap-6">
+        <div className={`${sttMode === 'tts' ? 'lg:col-span-2' : ''} flex flex-col gap-6`}>
           
-          {/* Quick Emotion Tags */}
-          <div className="bg-white/60 backdrop-blur-xl border border-black/5 rounded-2xl p-5 shadow-[0_2px_20px_rgba(0,0,0,0.02)]">
-            <h3 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3 flex items-center gap-2"><Sparkles className="w-3 h-3 text-orange-500"/> Insert Emotion Tag</h3>
-            <div className="flex flex-wrap gap-2">
-              {EMOTIONS.map(tag => (
-                <button key={tag} onClick={() => insertTag(tag)} className="px-3 py-1.5 bg-neutral-100/80 hover:bg-orange-100 hover:text-orange-700 text-neutral-600 text-sm font-medium rounded-lg transition-all active:scale-95 border border-black/5 shadow-sm">
-                  +{tag}
-                </button>
-              ))}
-            </div>
-          </div>
+          {sttMode === 'tts' ? (
+            <>
+              {/* Quick Emotion Tags */}
+              <div className="bg-white/60 backdrop-blur-xl border border-black/5 rounded-2xl p-5 shadow-[0_2px_20px_rgba(0,0,0,0.02)]">
+                <h3 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3 flex items-center gap-2"><Sparkles className="w-3 h-3 text-orange-500"/> Insert Emotion Tag</h3>
+                <div className="flex flex-wrap gap-2">
+                  {EMOTIONS.map(tag => (
+                    <button key={tag} onClick={() => insertTag(tag)} className="px-3 py-1.5 bg-neutral-100/80 hover:bg-orange-100 hover:text-orange-700 text-neutral-600 text-sm font-medium rounded-lg transition-all active:scale-95 border border-black/5 shadow-sm">
+                      +{tag}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-          {/* Editor */}
-          <div className="bg-white/80 backdrop-blur-2xl border border-black/5 rounded-3xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] overflow-hidden focus-within:ring-4 focus-within:ring-orange-500/10 focus-within:border-orange-500/50 transition-all flex flex-col">
-            <div className="bg-gradient-to-b from-neutral-50/50 to-transparent border-b border-black/5 px-6 py-4 flex items-center justify-between">
-               <div className="flex items-center gap-3">
-                 <div className="relative flex h-3 w-3">
-                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                   <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
-                 </div>
-                 <span className="text-sm font-semibold text-neutral-700 capitalize">{voice} <span className="text-neutral-400 font-normal">({tone || 'Neutral'})</span></span>
-               </div>
-               <span className="text-xs font-medium bg-neutral-100 text-neutral-500 px-2.5 py-1 rounded-md">{text.length} / 5000</span>
-            </div>
-            <textarea 
-              ref={textareaRef}
-              className="w-full min-h-[300px] p-6 resize-none bg-transparent focus:outline-none text-lg text-neutral-800 placeholder:text-neutral-300 leading-relaxed"
-              placeholder="Type your script here... Try clicking the emotion tags above to add <gasp> or <laugh>."
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-            />
-            <div className="p-4 border-t border-black/5 bg-neutral-50/50">
-              <button 
-                onClick={handleGenerate}
-                disabled={generating || isPlaying || text.length === 0}
-                className="w-full bg-gradient-to-br from-orange-500 to-amber-500 text-white px-8 py-4 rounded-2xl font-semibold shadow-[0_8px_20px_rgba(249,115,22,0.25)] hover:shadow-[0_12px_25px_rgba(249,115,22,0.35)] transition-all flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {generating ? <Loader2 className="w-5 h-5 animate-spin" /> : isPlaying ? <><Activity className="w-5 h-5 animate-pulse" /> Playing Live Stream...</> : <><Wand2 className="w-5 h-5" /> Generate Voiceover</>}
-              </button>
-            </div>
-          </div>
+              {/* Editor */}
+              <div className="bg-white/80 backdrop-blur-2xl border border-black/5 rounded-3xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] overflow-hidden focus-within:ring-4 focus-within:ring-orange-500/10 focus-within:border-orange-500/50 transition-all flex flex-col">
+                <div className="bg-gradient-to-b from-neutral-50/50 to-transparent border-b border-black/5 px-6 py-4 flex items-center justify-between">
+                   <div className="flex items-center gap-3">
+                     <div className="relative flex h-3 w-3">
+                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                       <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                     </div>
+                     <span className="text-sm font-semibold text-neutral-700 capitalize">{voice} <span className="text-neutral-400 font-normal">({tone || 'Neutral'})</span></span>
+                   </div>
+                   <span className="text-xs font-medium bg-neutral-100 text-neutral-500 px-2.5 py-1 rounded-md">{text.length} / 5000</span>
+                </div>
+                <textarea 
+                  ref={textareaRef}
+                  className="w-full min-h-[300px] p-6 resize-none bg-transparent focus:outline-none text-lg text-neutral-800 placeholder:text-neutral-300 leading-relaxed"
+                  placeholder="Type your script here... Try clicking the emotion tags above to add <gasp> or <laugh>."
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                />
+                <div className="p-4 border-t border-black/5 bg-neutral-50/50">
+                  <button 
+                    onClick={handleGenerate}
+                    disabled={generating || isPlaying || text.length === 0}
+                    className="w-full bg-gradient-to-br from-orange-500 to-amber-500 text-white px-8 py-4 rounded-2xl font-semibold shadow-[0_8px_20px_rgba(249,115,22,0.25)] hover:shadow-[0_12px_25px_rgba(249,115,22,0.35)] transition-all flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {generating ? <Loader2 className="w-5 h-5 animate-spin" /> : isPlaying ? <><Activity className="w-5 h-5 animate-pulse" /> Playing Live Stream...</> : <><Wand2 className="w-5 h-5" /> Generate Voiceover</>}
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* STT Panel */}
+              <div className="bg-white/80 backdrop-blur-2xl border border-black/5 rounded-3xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] overflow-hidden">
+                {/* Header */}
+                <div className="px-8 pt-8 pb-6 border-b border-black/5 text-center">
+                  <h3 className="text-xl font-bold text-neutral-800 mb-1">Speech to Text</h3>
+                  <p className="text-neutral-500 text-sm">Record your voice or upload a file. 1 credit per character.</p>
+                </div>
+                <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                  {/* LEFT: Record Live */}
+                  <div className="flex flex-col items-center justify-center gap-5 p-6 bg-neutral-50 rounded-2xl border border-black/5">
+                    <p className="text-xs font-semibold text-neutral-400 uppercase tracking-widest">Live Recording</p>
+                    {/* Visualizer */}
+                    <div className="flex items-end gap-[3px] h-14">
+                      {vizBars.map((h, i) => (
+                        <motion.div
+                          key={i}
+                          animate={{ height: h }}
+                          transition={{ duration: 0.08 }}
+                          style={{ height: h }}
+                          className={`w-1.5 rounded-full ${isRecording ? 'bg-gradient-to-t from-orange-500 to-amber-400' : 'bg-neutral-200'}`}
+                        />
+                      ))}
+                    </div>
+                    {isRecording && (
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+                        <span className="text-sm font-mono font-bold text-red-600">{formatTime(recordingTime)}</span>
+                        <span className="text-xs text-neutral-400">Recording...</span>
+                      </div>
+                    )}
+                    {!isRecording ? (
+                      <button
+                        onClick={startRecording}
+                        className="relative w-16 h-16 rounded-full bg-gradient-to-br from-orange-500 to-amber-500 text-white shadow-[0_8px_20px_rgba(249,115,22,0.4)] hover:shadow-[0_12px_28px_rgba(249,115,22,0.5)] transition-all hover:scale-105 active:scale-95 flex items-center justify-center"
+                      >
+                        <span className="absolute inset-0 rounded-full bg-orange-400/30 animate-ping" />
+                        <Mic2 className="w-7 h-7 relative z-10" />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={stopRecording}
+                        className="w-16 h-16 rounded-full bg-red-500 text-white shadow-[0_8px_20px_rgba(239,68,68,0.4)] hover:shadow-[0_12px_28px_rgba(239,68,68,0.5)] transition-all hover:scale-105 active:scale-95 flex items-center justify-center"
+                      >
+                        <span className="w-5 h-5 bg-white rounded-sm" />
+                      </button>
+                    )}
+                    <p className="text-xs text-neutral-400 text-center">{isRecording ? 'Click stop when done' : 'Click to start recording'}</p>
+                  </div>
+
+                  {/* RIGHT: Upload File */}
+                  <div className="flex flex-col items-center justify-center gap-4 p-6 bg-neutral-50 rounded-2xl border border-dashed border-neutral-200">
+                    <p className="text-xs font-semibold text-neutral-400 uppercase tracking-widest">Upload File</p>
+                    <div className="w-14 h-14 bg-white rounded-2xl border border-black/8 flex items-center justify-center shadow-sm">
+                      <Download className="w-6 h-6 text-neutral-400 rotate-180" />
+                    </div>
+                    <label className="cursor-pointer flex flex-col items-center gap-2 w-full">
+                      <span className="text-sm font-semibold text-neutral-700">Choose audio file</span>
+                      <span className="text-xs text-neutral-400">.wav, .mp3, .webm, .m4a</span>
+                      <input type="file" accept="audio/*" className="hidden" onChange={e => setSttFile(e.target.files ? e.target.files[0] : null)} />
+                      <span className="mt-1 px-4 py-2 bg-white border border-black/10 rounded-xl text-sm font-semibold text-neutral-600 shadow-sm hover:border-orange-300 hover:bg-orange-50 transition-all">Browse</span>
+                    </label>
+                    {sttFile && (
+                      <div className="w-full bg-white border border-orange-200 rounded-xl p-3 text-center">
+                        <p className="text-xs font-semibold text-orange-700 truncate">{sttFile.name}</p>
+                      </div>
+                    )}
+                    <button
+                      onClick={() => handleTranscribe()}
+                      disabled={generating || !sttFile}
+                      className="w-full bg-gradient-to-br from-orange-500 to-amber-500 text-white py-3 rounded-2xl font-semibold shadow-[0_6px_18px_rgba(249,115,22,0.25)] transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Wand2 className="w-4 h-4" /> Transcribe</>}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Confirmation Modal */}
+              <AnimatePresence>
+                {showConfirm && (
+                  <motion.div
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4"
+                  >
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.92, y: 20 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.92, y: 20 }}
+                      transition={{ type: 'spring', bounce: 0.25, duration: 0.4 }}
+                      className="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-md border border-black/5"
+                    >
+                      <div className="flex items-center gap-3 mb-6">
+                        <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center border border-orange-100">
+                          <Mic2 className="w-5 h-5 text-orange-500" />
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-neutral-900">Recording Preview</h4>
+                          <p className="text-xs text-neutral-400">Listen before sending for transcription</p>
+                        </div>
+                      </div>
+                      {recordingUrl && (
+                        <div className="bg-neutral-50 border border-black/5 rounded-2xl p-4 mb-6">
+                          <audio controls src={recordingUrl} className="w-full h-10 rounded-lg" />
+                          <p className="text-[10px] text-neutral-400 text-center mt-2 font-medium">
+                            Duration: {formatTime(recordingTime)} · High-quality 48kHz audio
+                          </p>
+                        </div>
+                      )}
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => { setShowConfirm(false); setRecordedBlob(null); setRecordingUrl(null); }}
+                          className="flex-1 py-3 rounded-2xl border border-black/10 text-sm font-semibold text-neutral-600 hover:bg-neutral-50 transition-all"
+                        >
+                          🔄 Re-record
+                        </button>
+                        <button
+                          onClick={() => recordedBlob && handleTranscribe(recordedBlob)}
+                          disabled={generating}
+                          className="flex-1 py-3 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-500 text-white text-sm font-semibold shadow-[0_6px_18px_rgba(249,115,22,0.3)] transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+                        >
+                          {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Wand2 className="w-4 h-4" /> Transcribe</>}
+                        </button>
+                      </div>
+                    </motion.div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </>
+          )}
 
           {/* Output Section */}
           <div ref={outputRef} className="bg-white/60 backdrop-blur-2xl border border-black/5 rounded-3xl p-6 shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
             <div className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-orange-50 border border-orange-100 text-orange-700 shadow-sm w-fit mb-5 text-xs font-bold uppercase tracking-widest">
                <Activity className="w-4 h-4 text-orange-500" />
-               Output
+               {sttMode === 'tts' ? 'Audio Output' : 'Transcription Output'}
             </div>
             
-            {audioUrl ? (
-              <div className="bg-gradient-to-br from-orange-50 to-amber-50/50 border border-orange-200/60 rounded-2xl p-5 shadow-inner relative overflow-hidden">
-                {/* Background decorative blob */}
-                <div className="absolute -right-10 -top-10 w-32 h-32 bg-orange-400/10 blur-3xl rounded-full pointer-events-none" />
-                
-                <div className="flex flex-col md:flex-row items-center justify-between gap-4 relative z-10">
-                  <div className="flex-1 w-full">
-                    <audio controls src={audioUrl} className="w-full h-12 rounded-lg" />
-                  </div>
+            {sttMode === 'tts' ? (
+              audioUrl ? (
+                <div className="bg-gradient-to-br from-orange-50 to-amber-50/50 border border-orange-200/60 rounded-2xl p-5 shadow-inner relative overflow-hidden">
+                  {/* Background decorative blob */}
+                  <div className="absolute -right-10 -top-10 w-32 h-32 bg-orange-400/10 blur-3xl rounded-full pointer-events-none" />
+                  
+                  <div className="flex flex-col md:flex-row items-center justify-between gap-4 relative z-10">
+                    <div className="flex-1 w-full">
+                      <audio controls src={audioUrl} className="w-full h-12 rounded-lg" />
+                    </div>
                   <div className="flex items-center gap-3 shrink-0">
-                    <a href={audioUrl} download="voiceforge-audio.wav" className="bg-orange-500 text-white flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold shadow-[0_4px_14px_rgba(249,115,22,0.3)] hover:bg-orange-600 transition-all hover:scale-[1.02] active:scale-[0.98]">
+                    <a href={audioUrl} download="linguamic-audio.wav" className="bg-orange-500 text-white flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold shadow-[0_4px_14px_rgba(249,115,22,0.3)] hover:bg-orange-600 transition-all hover:scale-[1.02] active:scale-[0.98]">
                       <Download className="w-4 h-4" /> Download
                     </a>
                   </div>
@@ -454,35 +774,149 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
                  <h4 className="text-neutral-700 font-semibold mb-1">No audio generated yet</h4>
                  <p className="text-sm text-neutral-400 max-w-sm">Hit the "Generate Voiceover" button above and your high-fidelity audio will appear right here.</p>
               </div>
+            )
+            ) : (
+              sttResult ? (
+                <div className="bg-neutral-50 border border-neutral-200 rounded-2xl p-6 relative overflow-hidden shadow-inner">
+                  <p className="text-neutral-800 text-lg leading-relaxed">{sttResult}</p>
+                </div>
+              ) : (
+                <div className="border-2 border-dashed border-black/5 bg-neutral-50/50 rounded-2xl p-10 flex flex-col items-center justify-center text-center">
+                   <div className="w-16 h-16 bg-white shadow-sm border border-black/5 rounded-full flex items-center justify-center mb-4">
+                     <Mic2 className="w-8 h-8 text-neutral-300" />
+                   </div>
+                   <h4 className="text-neutral-700 font-semibold mb-1">No transcription yet</h4>
+                   <p className="text-sm text-neutral-400 max-w-sm">Upload an audio file and hit Transcribe.</p>
+                </div>
+              )
             )}
           </div>
 
         </div>
 
         {/* RIGHT COLUMN: Settings */}
-        <div className="lg:col-span-1 space-y-6">
+        {sttMode === 'tts' && (
+          <div className="lg:col-span-1 space-y-6">
           
           <div className="bg-white/60 backdrop-blur-2xl border border-black/5 rounded-3xl p-6 shadow-[0_8px_30px_rgba(0,0,0,0.04)] sticky top-24">
             <h3 className="text-lg font-semibold mb-6 flex items-center gap-2 text-neutral-800"><SlidersHorizontal className="w-5 h-5 text-orange-500"/> Studio Controls</h3>
             
-            {/* Voice */}
-            <div className="mb-6 relative z-30">
-              <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2">Voice Model</label>
-              <PremiumSelect 
-                value={voice} 
-                onChange={setVoice} 
-                options={VOICES.map(v => ({ label: v, value: v }))} 
-              />
+            {/* Voice Model Dropdown */}
+            <div className="mb-5" ref={voiceRef}>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Voice Model</label>
+                <div className="flex items-center gap-2 text-[10px] text-neutral-400 font-medium">
+                  <span className="flex items-center gap-1"><User className="w-3 h-3 text-blue-400" /> ♀ Female</span>
+                  <span className="flex items-center gap-1"><User className="w-3 h-3 text-violet-400" /> ♂ Male</span>
+                </div>
+              </div>
+              <div className="relative">
+                {/* Trigger */}
+                <button
+                  onClick={() => { setVoiceOpen(o => !o); setToneOpen(false); }}
+                  className="w-full flex items-center gap-3 px-4 py-3 bg-white border border-black/10 rounded-2xl shadow-sm hover:border-orange-300 hover:bg-orange-50/30 transition-all"
+                >
+                  <span className="text-xl leading-none">{VOICE_META[voice]?.emoji}</span>
+                  <div className="flex-1 text-left min-w-0">
+                    <div className="text-sm font-bold text-neutral-800 capitalize">{voice === 'jessi' ? 'Jessi' : voice.charAt(0).toUpperCase() + voice.slice(1)}</div>
+                    <div className={`text-[10px] font-medium ${VOICE_META[voice]?.gender === 'female' ? 'text-blue-500' : 'text-violet-500'}`}>
+                      {VOICE_META[voice]?.gender === 'female' ? '♀' : '♂'} {VOICE_META[voice]?.desc}
+                    </div>
+                  </div>
+                  <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform ${voiceOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {/* Panel */}
+                <AnimatePresence>
+                  {voiceOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -8, scale: 0.97 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -8, scale: 0.97 }}
+                      transition={{ duration: 0.18, ease: 'easeOut' }}
+                      className="absolute z-50 top-full left-0 right-0 mt-2 bg-white border border-black/10 rounded-2xl shadow-xl overflow-hidden max-h-56 overflow-y-auto"
+                    >
+                      {VOICES.map(v => {
+                        const meta = VOICE_META[v];
+                        const isActive = voice === v;
+                        return (
+                          <button
+                            key={v}
+                            onClick={() => { setVoice(v); setVoiceOpen(false); }}
+                            className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-all hover:bg-neutral-50 ${
+                              isActive ? 'bg-orange-50' : ''
+                            }`}
+                          >
+                            <span className="text-xl leading-none">{meta.emoji}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className={`text-sm font-bold capitalize ${isActive ? 'text-orange-600' : 'text-neutral-800'}`}>
+                                {v === 'jessi' ? 'Jessi' : v.charAt(0).toUpperCase() + v.slice(1)}
+                              </div>
+                              <div className={`text-[10px] font-medium ${meta.gender === 'female' ? 'text-blue-500' : 'text-violet-500'}`}>
+                                {meta.gender === 'female' ? '♀ Female' : '♂ Male'} · {meta.desc}
+                              </div>
+                            </div>
+                            {isActive && <div className="w-2 h-2 rounded-full bg-orange-400 shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             </div>
 
-            {/* Tone */}
-            <div className="mb-6 relative z-20">
+            {/* Speaking Tone Dropdown */}
+            <div className="mb-5" ref={toneRef}>
               <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2">Speaking Tone</label>
-              <PremiumSelect 
-                value={tone || 'none'} 
-                onChange={handleToneChange} 
-                options={TONES.map(t => ({ label: t === 'none' ? 'Neutral (No Tone)' : t, value: t }))} 
-              />
+              <div className="relative">
+                {/* Trigger */}
+                <button
+                  onClick={() => { setToneOpen(o => !o); setVoiceOpen(false); }}
+                  className="w-full flex items-center gap-3 px-4 py-3 bg-white border border-black/10 rounded-2xl shadow-sm hover:border-orange-300 hover:bg-orange-50/30 transition-all"
+                >
+                  <span className="text-xl leading-none">{TONE_META[tone || 'none']?.emoji}</span>
+                  <div className="flex-1 text-left">
+                    <div className="text-sm font-bold text-neutral-800">{TONE_META[tone || 'none']?.desc}</div>
+                    <div className="text-[10px] font-medium text-neutral-400">Speaking style preset</div>
+                  </div>
+                  <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform ${toneOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {/* Panel */}
+                <AnimatePresence>
+                  {toneOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -8, scale: 0.97 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -8, scale: 0.97 }}
+                      transition={{ duration: 0.18, ease: 'easeOut' }}
+                      className="absolute z-50 top-full left-0 right-0 mt-2 bg-white border border-black/10 rounded-2xl shadow-xl overflow-hidden max-h-64 overflow-y-auto"
+                    >
+                      {TONES.map(t => {
+                        const meta = TONE_META[t];
+                        const isActive = (tone || 'none') === t;
+                        return (
+                          <button
+                            key={t}
+                            onClick={() => { handleToneChange(t); setToneOpen(false); }}
+                            className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-all hover:bg-neutral-50 ${
+                              isActive ? 'bg-orange-50' : ''
+                            }`}
+                          >
+                            <span className="text-xl leading-none">{meta.emoji}</span>
+                            <div className="flex-1">
+                              <div className={`text-sm font-bold ${isActive ? 'text-orange-600' : 'text-neutral-800'}`}>{meta.desc}</div>
+                              <div className="text-[10px] font-medium text-neutral-400">
+                                {t === 'none' ? 'No tone modifier applied' : `Applies ${meta.desc.toLowerCase()} speaking style`}
+                              </div>
+                            </div>
+                            {isActive && <div className="w-2 h-2 rounded-full bg-orange-400 shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             </div>
 
             {/* Speed Slider (Glassy) */}
@@ -538,15 +972,14 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
                 )}
               </AnimatePresence>
             </div>
-
           </div>
         </div>
-
-      </div>
+        )}
+        </motion.div>
+      </AnimatePresence>
     </motion.div>
-  )
+  );
 }
-
 
 // Per-plan themes — mirrors the pricing page card aesthetics exactly
 const PLAN_THEMES: Record<string, {

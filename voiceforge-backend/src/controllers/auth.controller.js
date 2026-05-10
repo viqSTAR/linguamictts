@@ -62,10 +62,11 @@ const register = async (req, res) => {
         email: user.email,
         name: user.name,
         creditsBalance: user.creditsBalance,
+        addonCredits: user.addonCredits,
         plan: user.plan,
         planMonthlyCredits: user.planMonthlyCredits,
       },
-      apiKey: rawApiKey // Only show raw key once
+      apiKey: rawApiKey
     });
   } catch (error) {
     console.error('Registration error:', error);
@@ -104,6 +105,7 @@ const login = async (req, res) => {
         email: user.email,
         name: user.name,
         creditsBalance: user.creditsBalance,
+        addonCredits: user.addonCredits,
         plan: user.plan,
         planMonthlyCredits: user.planMonthlyCredits,
       },
@@ -123,6 +125,7 @@ const getMe = async (req, res) => {
         email: true,
         name: true,
         creditsBalance: true,
+        addonCredits: true,
         plan: true,
         planMonthlyCredits: true,
         createdAt: true,
@@ -220,6 +223,7 @@ const googleAuth = async (req, res) => {
         email: user.email,
         name: user.name,
         creditsBalance: user.creditsBalance,
+        addonCredits: user.addonCredits,
         plan: user.plan,
         planMonthlyCredits: user.planMonthlyCredits,
         picture,
@@ -241,7 +245,7 @@ const updateMe = async (req, res) => {
     const updatedUser = await prisma.user.update({
       where: { id: req.userId },
       data: { name: name.trim() },
-      select: { id: true, email: true, name: true, creditsBalance: true, plan: true, planMonthlyCredits: true },
+      select: { id: true, email: true, name: true, creditsBalance: true, addonCredits: true, plan: true, planMonthlyCredits: true },
     });
     res.json({ user: updatedUser });
   } catch (error) {

@@ -334,10 +334,66 @@ const proxyDemoTTS = async (req, res) => {
   }
 };
 
+const proxyStudioSTT = async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.userId } });
+    if (!user || user.creditsBalance <= 0) {
+      return res.status(402).json({ error: 'Insufficient credits.' });
+    }
+
+    const FormData = require('form-data');
+    const form = new FormData();
+    if (req.file) {
+      form.append('file', req.file.buffer, req.file.originalname);
+    } else {
+      return res.status(400).json({ error: 'Audio file is required' });
+    }
+
+    const response = await axios.post(`${FASTAPI_URL}/v1/stt`, form, {
+      headers: {
+        'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}`,
+        ...form.getHeaders(),
+      },
+      validateStatus: () => true,
+    });
+
+    if (response.status !== 200) {
+      return res.status(response.status).json(response.data);
+    }
+
+    const transcribedText = response.data.text || '';
+    const charCount = transcribedText.length;
+    const creditsDeducted = charCount > 0 ? charCount : 0; // 1 credit per character
+
+    const deduction = await deductCreditsAndLog({
+      userId: req.userId,
+      endpointType: 'STUDIO_STT',
+      creditsDeducted,
+      charsCount: charCount,
+    });
+
+    if (!deduction.ok) {
+      return res.status(402).json({ error: 'Insufficient credits.' });
+    }
+
+    res.json({
+      ...response.data,
+      billing: {
+        creditsDeducted,
+        creditsRemaining: deduction.creditsRemaining
+      }
+    });
+  } catch (error) {
+    console.error('Studio STT Error:', error.message);
+    res.status(500).json({ error: 'Studio STT failed' });
+  }
+};
+
 module.exports = {
   proxyTTS,
   proxySTT,
   proxyVoices,
   proxyStudioTTS,
+  proxyStudioSTT,
   proxyDemoTTS,
 };

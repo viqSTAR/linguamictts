@@ -1,6 +1,6 @@
 const express = require('express');
 const multer = require('multer');
-const { proxyTTS, proxySTT, proxyVoices, proxyStudioTTS, proxyDemoTTS } = require('../controllers/proxy.controller');
+const { proxyTTS, proxySTT, proxyVoices, proxyStudioTTS, proxyDemoTTS, proxyStudioSTT } = require('../controllers/proxy.controller');
 const { verifyApiKey } = require('../middlewares/api.middleware');
 const { verifyToken } = require('../middlewares/auth.middleware');
 
@@ -29,6 +29,7 @@ router.post('/demo', proxyDemoTTS);
 
 // Studio endpoint (uses JWT auth)
 router.post('/studio/tts', verifyToken, proxyStudioTTS);
+router.post('/studio/stt', verifyToken, handleSttUpload, proxyStudioSTT);
 
 // Public API endpoints (use API key auth)
 router.use(verifyApiKey);

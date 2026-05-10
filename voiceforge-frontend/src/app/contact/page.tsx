@@ -17,7 +17,7 @@ export default function Contact() {
             </div>
             <h3 className="text-lg font-semibold text-neutral-900 mb-2">Email Support</h3>
             <p className="text-neutral-500 mb-4 text-sm">For general inquiries and technical assistance.</p>
-            <a href="mailto:support@voiceforge.ai" className="text-orange-600 font-medium hover:text-orange-700 transition-colors">support@voiceforge.ai</a>
+            <a href="mailto:support@linguamic.ai" className="text-orange-600 font-medium hover:text-orange-700 transition-colors">support@linguamic.ai</a>
           </div>
 
           <div className="bg-white border border-black/5 p-8 rounded-[2rem] shadow-sm">

@@ -3,6 +3,8 @@ import Navbar from '../components/Navbar';
 import Link from 'next/link';
 import { ArrowRight, Play, Code2, Zap } from 'lucide-react';
 import { motion } from 'framer-motion';
+import Image from 'next/image';
+import logo from '@/assets/linguamicorange copy.png';
 
 // Premium grain noise for texture
 const NoiseOverlay = () => (
@@ -171,7 +173,7 @@ export default function Home() {
           <div className="flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.8)] animate-pulse" />
           </div>
-          <span className="text-sm font-semibold text-neutral-800 tracking-wide uppercase">VoiceForge Studio 2.0</span>
+          <span className="text-sm font-semibold text-neutral-800 tracking-wide uppercase">Linguamic Studio 2.0</span>
         </motion.div>
 
         <motion.h1 
@@ -537,16 +539,14 @@ export default function Home() {
           
           <div className="col-span-2 md:col-span-1">
             <div className="flex items-center gap-2 mb-6">
-              <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-orange-500 to-amber-400 text-white flex items-center justify-center font-bold text-lg shadow-lg">
-                V
-              </span>
-              <span className="text-xl font-semibold text-white tracking-tight">VoiceForge</span>
+              <Image src={logo} alt="Linguamic Logo" className="w-8 h-8 object-contain" />
+              <span className="text-xl font-semibold text-white tracking-tight">Linguamic</span>
             </div>
             <p className="text-sm leading-relaxed mb-6 font-light">
               Pioneering the future of digital voice with ultra-realistic, cinematic AI generation.
             </p>
             <div className="text-xs">
-              &copy; {new Date().getFullYear()} VoiceForge Inc. All rights reserved.
+              &copy; {new Date().getFullYear()} Linguamic Inc. All rights reserved.
             </div>
           </div>
 
@@ -564,7 +564,7 @@ export default function Home() {
             <h4 className="text-white font-medium mb-6 uppercase tracking-wider text-xs">Company</h4>
             <ul className="space-y-4 text-sm font-light">
               <li><Link href="/contact" className="hover:text-white transition-colors">Contact Us</Link></li>
-              <li><a href="#" className="hover:text-white transition-colors">About</a></li>
+              <li><Link href="/about" className="hover:text-white transition-colors">About Us</Link></li>
               <li><a href="#" className="hover:text-white transition-colors">Blog</a></li>
               <li><a href="#" className="hover:text-white transition-colors">Careers</a></li>
             </ul>
@@ -575,6 +575,7 @@ export default function Home() {
             <ul className="space-y-4 text-sm font-light">
               <li><Link href="/terms" className="hover:text-white transition-colors">Terms of Service</Link></li>
               <li><Link href="/privacy" className="hover:text-white transition-colors">Privacy Policy</Link></li>
+              <li><Link href="/attributions" className="hover:text-white transition-colors">Attributions</Link></li>
               <li><a href="#" className="hover:text-white transition-colors">Security</a></li>
             </ul>
           </div>

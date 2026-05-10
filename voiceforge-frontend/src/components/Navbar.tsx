@@ -4,6 +4,8 @@ import React, { useState, useEffect } from 'react';
 import { motion, useScroll } from 'framer-motion';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
+import Image from 'next/image';
+import logo from '@/assets/linguamicorange copy.png';
 
 export default function Navbar() {
   const { scrollY } = useScroll();
@@ -79,8 +81,8 @@ export default function Navbar() {
           transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
         >
           <Link href="/" className="flex items-center gap-2 font-bold text-lg tracking-tight hover:opacity-70 transition-opacity">
-             <div className="w-5 h-5 bg-black rounded-sm" />
-             VOICEFORGE
+             <Image src={logo} alt="Linguamic Logo" className="w-6 h-6 object-contain" />
+             LINGUAMIC
           </Link>
         </motion.div>
 

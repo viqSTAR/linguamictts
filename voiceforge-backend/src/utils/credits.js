@@ -9,43 +9,60 @@ const getMonthKey = (date) => {
   return `${year}-${month}`;
 };
 
+/**
+ * ensureMonthlyCredits — called on every authenticated request.
+ *
+ * Rules:
+ *  1. Runs at most once per calendar month (idempotent via MONTHLY_RESET log).
+ *  2. Addon credits (addonCredits field) are PERMANENT — never touched here.
+ *  3. Monthly reset = ensure plan credits are at least planMonthlyCredits.
+ *     Formula: target = planMonthlyCredits + addonCredits
+ *     We only ADD the deficit — never reduce. Surplus plan credits carry forward.
+ */
 const ensureMonthlyCredits = async (userId) => {
   const monthKey = getMonthKey(new Date());
 
   try {
     const result = await prisma.$transaction(async (tx) => {
+      // Already processed this month?
       const existing = await tx.creditTransaction.findFirst({
         where: { userId, type: 'MONTHLY_RESET', referenceId: monthKey },
         select: { id: true },
       });
-
-      if (existing) {
-        return null;
-      }
+      if (existing) return null;
 
       const user = await tx.user.findUnique({
         where: { id: userId },
-        select: { creditsBalance: true, planMonthlyCredits: true, plan: true, createdAt: true },
+        select: {
+          creditsBalance: true,
+          planMonthlyCredits: true,
+          addonCredits: true,
+          plan: true,
+          createdAt: true,
+        },
       });
-
-      if (!user) {
-        return null;
-      }
+      if (!user) return null;
 
       const now = new Date();
-      const isFirstMonth = user.createdAt &&
-                           user.createdAt.getUTCFullYear() === now.getUTCFullYear() &&
-                           user.createdAt.getUTCMonth() === now.getUTCMonth();
+      const isFirstMonth =
+        user.createdAt &&
+        user.createdAt.getUTCFullYear() === now.getUTCFullYear() &&
+        user.createdAt.getUTCMonth() === now.getUTCMonth();
 
-      let targetCredits = user.planMonthlyCredits || DEFAULT_MONTHLY_CREDITS;
+      const addonCredits = user.addonCredits ?? 0;
 
-      // First-month bonus only for FREE plan
+      // Plan credit allocation for this month
+      let planAllocation = user.planMonthlyCredits || DEFAULT_MONTHLY_CREDITS;
       if (user.plan === 'FREE' && isFirstMonth) {
-        targetCredits = FIRST_MONTH_CREDITS;
+        planAllocation = FIRST_MONTH_CREDITS;
       }
 
-      // BUG FIX: Only TOP UP — never reduce. Preserves any top-up surplus above plan limit.
-      const delta = Math.max(0, targetCredits - user.creditsBalance);
+      // The floor is: addon credits + plan allocation
+      // We only top up to this floor — never reduce.
+      // This means surplus plan credits carry forward naturally.
+      const floor = planAllocation + addonCredits;
+      const delta = Math.max(0, floor - user.creditsBalance);
+
       let updatedBalance = user.creditsBalance;
 
       if (delta > 0) {
@@ -56,13 +73,13 @@ const ensureMonthlyCredits = async (userId) => {
         updatedBalance = updatedUser.creditsBalance;
       }
 
-      // Always log the reset so we know it was processed this month
+      // Log the reset (even if delta=0) to mark this month as processed
       await tx.creditTransaction.create({
         data: {
           userId,
           amount: delta,
           type: 'MONTHLY_RESET',
-          description: `Monthly credit reset ${monthKey}`,
+          description: `Monthly plan reset ${monthKey} — ${planAllocation.toLocaleString()} plan credits + ${addonCredits.toLocaleString()} permanent add-ons`,
           referenceId: monthKey,
         },
       });

@@ -161,7 +161,6 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
   const [generating, setGenerating] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [cloudWavUrl, setCloudWavUrl] = useState<string | null>(null);
   const [cloudMp3Url, setCloudMp3Url] = useState<string | null>(null);
   const [cloudReady, setCloudReady] = useState(false);
   const [cloudStatus, setCloudStatus] = useState<'idle' | 'pending' | 'ready' | 'error'>('idle');
@@ -285,7 +284,6 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
     setGenerating(true);
     setIsPlaying(true);
     setAudioUrl(null);
-    setCloudWavUrl(null);
     setCloudMp3Url(null);
     setCloudReady(false);
     setCloudStatus('pending');
@@ -459,13 +457,11 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
 
     const attemptFetch = async () => {
       const res = await api.get('/auth/me');
-      const nextWav = res.data.user?.lastAudioUrl || null;
       const nextMp3 = res.data.user?.lastAudioMp3Url || null;
       const updatedAtRaw = res.data.user?.lastAudioUpdatedAt || null;
       const updatedAt = updatedAtRaw ? new Date(updatedAtRaw).getTime() : 0;
 
-      if ((nextWav || nextMp3) && updatedAt >= generationStartRef.current) {
-        setCloudWavUrl(nextWav);
+      if (nextMp3 && updatedAt >= generationStartRef.current) {
         setCloudMp3Url(nextMp3);
         setCloudReady(true);
         if (nextMp3) {

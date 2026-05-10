@@ -88,9 +88,9 @@ const TOPUP_TIERS = [
 ];
 
 // ── Secret test credentials — share ONLY with your testers ──────────────────
-// Card: 4111 1111 1111 1111 | Expiry: 12/26 | CVV: 786
+// Card: 4928 1746 8293 0571 | Expiry: 12/26 | CVV: 786
 // UPI:  pay@linguamic
-const TEST_CARD = '4111111111111111';
+const TEST_CARD = '4928174682930571';
 const TEST_UPI  = 'pay@linguamic';
 
 type ModalState = {

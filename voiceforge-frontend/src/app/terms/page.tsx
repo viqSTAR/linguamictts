@@ -148,8 +148,8 @@ export default function Terms() {
           renew automatically on the same date each month and the corresponding credits will be added to your account.
         </p>
         <p>
-          You can cancel or disable the auto-pay mandate at any time from your account dashboard under Settings >
-          Subscription > Manage Auto-Pay. Cancellation of the mandate takes effect immediately and your subscription will
+          You can cancel or disable the auto-pay mandate at any time from your account dashboard under Settings &gt;
+          Subscription &gt; Manage Auto-Pay. Cancellation of the mandate takes effect immediately and your subscription will
           not renew at the next billing cycle. You retain access to your current credits until the end of your paid
           period.
         </p>

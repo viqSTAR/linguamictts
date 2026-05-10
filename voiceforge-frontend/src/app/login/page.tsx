@@ -14,6 +14,14 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const getErrorMessage = (err: unknown, fallback: string) => {
+    if (typeof err === 'object' && err !== null) {
+      const maybe = err as { response?: { data?: { error?: string } } };
+      return maybe.response?.data?.error || fallback;
+    }
+    return fallback;
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -22,8 +30,8 @@ export default function Login() {
       const res = await api.post('/auth/login', { email, password });
       localStorage.setItem('token', res.data.token);
       router.push('/studio');
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Login failed');
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Login failed'));
     } finally {
       setLoading(false);
     }
@@ -36,8 +44,8 @@ export default function Login() {
         const res = await api.post('/auth/google', { credential: tokenResponse.access_token });
         localStorage.setItem('token', res.data.token);
         router.push('/studio');
-      } catch (err: any) {
-        setError(err.response?.data?.error || 'Google login failed');
+      } catch (err: unknown) {
+        setError(getErrorMessage(err, 'Google login failed'));
         setLoading(false);
       }
     },
@@ -115,7 +123,7 @@ export default function Login() {
           </form>
 
           <p className="text-center mt-8 text-sm text-neutral-500">
-            Don't have an account? <Link href="/register" className="text-orange-600 font-semibold hover:text-orange-500 transition-colors">Sign up</Link>
+            Don&apos;t have an account? <Link href="/register" className="text-orange-600 font-semibold hover:text-orange-500 transition-colors">Sign up</Link>
           </p>
         </div>
       </motion.div>

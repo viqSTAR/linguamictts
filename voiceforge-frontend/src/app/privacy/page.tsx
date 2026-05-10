@@ -60,7 +60,7 @@ export default function Privacy() {
 
       <DocSection number="04" title="How We Use Your Data">
         <ul className="list-disc space-y-2 pl-5">
-          <li>To provide and improve LinguaMic's services.</li>
+          <li>To provide and improve LinguaMic&apos;s services.</li>
           <li>To manage your account and credits.</li>
           <li>To process payments and manage subscriptions.</li>
           <li>To send transactional emails - account confirmation, renewal reminders, credit updates.</li>

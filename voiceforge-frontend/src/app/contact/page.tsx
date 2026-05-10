@@ -8,7 +8,7 @@ export default function Contact() {
       <Navbar />
       <div className="pt-40 pb-32 px-6 max-w-3xl mx-auto text-center">
         <h1 className="text-4xl md:text-5xl font-semibold mb-6 text-neutral-900 tracking-tight">Get in touch.</h1>
-        <p className="text-xl text-neutral-500 mb-16 font-light">Have questions about our API, enterprise pricing, or need technical support? We're here to help.</p>
+        <p className="text-xl text-neutral-500 mb-16 font-light">Have questions about our API, enterprise pricing, or need technical support? We&apos;re here to help.</p>
         
         <div className="grid md:grid-cols-2 gap-6 text-left">
           <div className="bg-white border border-black/5 p-8 rounded-[2rem] shadow-sm">

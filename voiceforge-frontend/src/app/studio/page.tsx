@@ -8,7 +8,7 @@ import logo from '@/assets/linguamicorange copy.png';
 import { 
   Mic2, CreditCard, Settings, LogOut, 
   Download, ChevronDown, Sparkles, Loader2, Wand2, SlidersHorizontal, Activity,
-  User, Users
+  User
 } from 'lucide-react';
 import api from '@/lib/api';
 
@@ -18,12 +18,20 @@ const tabs = [
   { id: 'settings',  label: 'Settings',           icon: Settings },
 ];
 
+type UserProfile = {
+  name?: string;
+  email?: string;
+  plan?: string;
+  planMonthlyCredits?: number;
+  creditsBalance?: number;
+};
+
 export default function Studio() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('playground');
   const [text, setText] = useState('');
   
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
   useEffect(() => {
@@ -121,7 +129,7 @@ export default function Studio() {
         {/* Content Views */}
         <main className="p-8 max-w-5xl mx-auto w-full pb-20">
           <AnimatePresence mode="wait">
-            {activeTab === 'playground' && <PlaygroundView key="playground" text={text} setText={setText} user={user} setUser={setUser} />}
+            {activeTab === 'playground' && <PlaygroundView key="playground" text={text} setText={setText} setUser={setUser} />}
             {activeTab === 'billing'    && <BillingView   key="billing"    user={user} />}
             {activeTab === 'settings'  && <SettingsView  key="settings"   user={user} setUser={setUser} />}
           </AnimatePresence>
@@ -132,7 +140,7 @@ export default function Studio() {
 }
 
 // Sub-components
-function PlaygroundView({ text, setText, user, setUser }: { text: string, setText: (val: string) => void, user: any, setUser: any }) {
+function PlaygroundView({ text, setText, setUser }: { text: string; setText: (val: string) => void; setUser: React.Dispatch<React.SetStateAction<UserProfile | null>> }) {
   const [generating, setGenerating] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -257,7 +265,9 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
     
     // Initialize Audio Context for streaming playback
     if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const AudioContextCtor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextCtor) throw new Error('AudioContext not supported');
+      audioContextRef.current = new AudioContextCtor();
     }
     const context = audioContextRef.current;
     if (context.state === 'suspended') {
@@ -267,7 +277,7 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
 
     try {
       const resolvedVoice = voice === 'jessi' ? 'jess' : voice;
-      const payload: any = { text, voice: resolvedVoice };
+      const payload: Record<string, unknown> = { text, voice: resolvedVoice };
       if (tone) payload.tone = tone;
       if (!tone && speed !== 1.0) payload.speed = speed;
       if (temperature !== 0.35) payload.temperature = temperature;
@@ -290,9 +300,9 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
 
       const remainingCredits = response.headers.get('x-credits-remaining');
       if (remainingCredits) {
-         setUser((prev: any) => ({ ...prev, creditsBalance: parseInt(remainingCredits, 10) }));
+        setUser((prev) => (prev ? { ...prev, creditsBalance: parseInt(remainingCredits, 10) } : prev));
       } else {
-         setUser((prev: any) => ({ ...prev, creditsBalance: Math.max(0, prev.creditsBalance - text.length) }));
+        setUser((prev) => (prev ? { ...prev, creditsBalance: Math.max(0, (prev.creditsBalance ?? 0) - text.length) } : prev));
       }
 
       if (!response.body) throw new Error("ReadableStream not supported");
@@ -437,9 +447,9 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
 
       if (!response.ok) throw new Error('Server error: ' + response.status);
       
-      const data = await response.json();
+      const data = await response.json() as { billing?: { creditsRemaining?: number }; text?: string };
       if (data.billing?.creditsRemaining !== undefined) {
-         setUser((prev: any) => ({ ...prev, creditsBalance: data.billing.creditsRemaining }));
+        setUser((prev) => (prev ? { ...prev, creditsBalance: data.billing?.creditsRemaining } : prev));
       }
       if (data.text) setSttResult(data.text);
     } catch (err) {
@@ -772,7 +782,7 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string, setTex
                    <Mic2 className="w-8 h-8 text-neutral-300" />
                  </div>
                  <h4 className="text-neutral-700 font-semibold mb-1">No audio generated yet</h4>
-                 <p className="text-sm text-neutral-400 max-w-sm">Hit the "Generate Voiceover" button above and your high-fidelity audio will appear right here.</p>
+                 <p className="text-sm text-neutral-400 max-w-sm">Hit the &quot;Generate Voiceover&quot; button above and your high-fidelity audio will appear right here.</p>
               </div>
             )
             ) : (
@@ -1087,7 +1097,7 @@ const PLAN_THEMES: Record<string, {
   },
 };
 
-function BillingView({ user }: { user: any }) {
+function BillingView({ user }: { user: UserProfile | null }) {
   const planKey            = (user?.plan || 'FREE').toString().toLowerCase();
   const theme              = PLAN_THEMES[planKey] || PLAN_THEMES.free;
   const monthlyAllocation  = user?.planMonthlyCredits || 10000;
@@ -1243,7 +1253,7 @@ function BillingView({ user }: { user: any }) {
 
 
 
-function SettingsView({ user, setUser }: { user: any, setUser: any }) {
+function SettingsView({ user, setUser }: { user: UserProfile | null; setUser: React.Dispatch<React.SetStateAction<UserProfile | null>> }) {
   const [name, setName] = useState(user?.name || '');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -1253,7 +1263,7 @@ function SettingsView({ user, setUser }: { user: any, setUser: any }) {
     setSaving(true);
     try {
       const res = await api.put('/auth/me', { name: name.trim() });
-      setUser((prev: any) => ({ ...prev, name: res.data.user.name }));
+      setUser((prev) => (prev ? { ...prev, name: res.data.user.name } : prev));
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch {
@@ -1302,64 +1312,3 @@ function SettingsView({ user, setUser }: { user: any, setUser: any }) {
   );
 }
 
-function PremiumSelect({ value, options, onChange }: { value: string, options: {label: string, value: string}[], onChange: (val: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const selectedLabel = options.find(o => o.value === value)?.label || value;
-
-  return (
-    <div className="relative" ref={ref}>
-      <button 
-        type="button"
-        onClick={() => setOpen(!open)} 
-        className={`w-full bg-white border ${open ? 'border-orange-500 ring-2 ring-orange-500/30' : 'border-black/10'} text-neutral-800 rounded-xl px-4 py-3 flex items-center justify-between focus:outline-none transition-all shadow-sm`}
-      >
-        <span className="font-medium capitalize">{selectedLabel}</span>
-        <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
-
-      <AnimatePresence>
-        {open && (
-          <motion.div 
-            initial={{ opacity: 0, y: -5, scale: 0.95 }} 
-            animate={{ opacity: 1, y: 0, scale: 1 }} 
-            exit={{ opacity: 0, y: -5, scale: 0.95 }}
-            transition={{ duration: 0.15, ease: "easeOut" }}
-            className="absolute top-full left-0 mt-2 w-full bg-white/95 backdrop-blur-xl border border-black/10 rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.08)] overflow-hidden z-[100] p-1"
-          >
-            <div className="max-h-60 overflow-y-auto">
-              {options.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => {
-                    onChange(opt.value);
-                    setOpen(false);
-                  }}
-                  className={`w-full text-left px-4 py-2.5 rounded-xl text-sm font-medium capitalize transition-all ${
-                    value === opt.value 
-                      ? 'bg-orange-50 text-orange-700' 
-                      : 'text-neutral-700 hover:bg-neutral-50 hover:text-orange-600'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}

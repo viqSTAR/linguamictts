@@ -14,6 +14,14 @@ export default function Register() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const getErrorMessage = (err: unknown, fallback: string) => {
+    if (typeof err === 'object' && err !== null) {
+      const maybe = err as { response?: { data?: { error?: string } } };
+      return maybe.response?.data?.error || fallback;
+    }
+    return fallback;
+  };
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -29,8 +37,8 @@ export default function Register() {
       const res = await api.post('/auth/register', { email, password, name: email.split('@')[0] });
       localStorage.setItem('token', res.data.token);
       router.push('/studio');
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Registration failed');
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Registration failed'));
     } finally {
       setLoading(false);
     }
@@ -43,8 +51,8 @@ export default function Register() {
         const res = await api.post('/auth/google', { credential: tokenResponse.access_token });
         localStorage.setItem('token', res.data.token);
         router.push('/studio');
-      } catch (err: any) {
-        setError(err.response?.data?.error || 'Google login failed');
+      } catch (err: unknown) {
+        setError(getErrorMessage(err, 'Google login failed'));
         setLoading(false);
       }
     },

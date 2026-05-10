@@ -1,7 +1,7 @@
 "use client";
 import Navbar from '../components/Navbar';
 import Link from 'next/link';
-import { ArrowRight, Play, Code2, Zap } from 'lucide-react';
+import { Play } from 'lucide-react';
 import { motion } from 'framer-motion';
 import Image from 'next/image';
 import logo from '@/assets/linguamicorange copy.png';
@@ -333,7 +333,7 @@ export default function Home() {
           >
             <h2 className="text-4xl md:text-5xl font-semibold text-neutral-900 tracking-tight mb-6">The complete toolkit for audio creators.</h2>
             <p className="text-lg md:text-xl text-neutral-500 max-w-3xl mx-auto font-light leading-relaxed">
-              We've engineered the world's most advanced AI audio models into an intuitive platform, giving you unprecedented, professional control over how your content sounds.
+              We&apos;ve engineered the world&apos;s most advanced AI audio models into an intuitive platform, giving you unprecedented, professional control over how your content sounds.
             </p>
           </motion.div>
 

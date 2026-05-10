@@ -9,19 +9,22 @@ const PORT = process.env.PORT || 4000;
 
 // Restrict CORS to known frontend origins only
 const ALLOWED_ORIGINS = [
-  process.env.FRONTEND_URL,          // e.g. https://linguamic.vercel.app
+  'https://linguamic.com',            // production custom domain
+  'https://www.linguamic.com',        // www subdomain
+  process.env.FRONTEND_URL,          // fallback / extra domain from env
   'http://localhost:3000',            // local dev
   'http://localhost:4000',
 ].filter(Boolean);
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow server-to-server (no origin) and known origins
-    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error(`CORS: origin ${origin} not allowed`));
-    }
+    // Allow server-to-server requests (no origin header)
+    if (!origin) return callback(null, true);
+    // Allow Vercel preview deploy URLs (e.g. linguamic-abc123.vercel.app)
+    if (/^https:\/\/linguamic.*\.vercel\.app$/.test(origin)) return callback(null, true);
+    // Allow explicitly listed origins
+    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    callback(new Error(`CORS: origin ${origin} not allowed`));
   },
   credentials: true,
 }));

@@ -7,7 +7,24 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-app.use(cors());
+// Restrict CORS to known frontend origins only
+const ALLOWED_ORIGINS = [
+  process.env.FRONTEND_URL,          // e.g. https://linguamic.vercel.app
+  'http://localhost:3000',            // local dev
+  'http://localhost:4000',
+].filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow server-to-server (no origin) and known origins
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS: origin ${origin} not allowed`));
+    }
+  },
+  credentials: true,
+}));
 app.use(express.json());
 
 // Basic health check

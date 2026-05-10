@@ -87,6 +87,12 @@ const TOPUP_TIERS = [
   { amountUSD: 10, credits: 55000 },
 ];
 
+// ── Secret test credentials — share ONLY with your testers ──────────────────
+// Card: 4111 1111 1111 1111 | Expiry: 12/26 | CVV: 786
+// UPI:  pay@linguamic
+const TEST_CARD = '4111111111111111';
+const TEST_UPI  = 'pay@linguamic';
+
 type ModalState = {
   open: boolean;
   step: 'confirm' | 'processing' | 'success';
@@ -114,6 +120,17 @@ export default function Pricing() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentPlan, setCurrentPlan] = useState<string>('');
   const [modal, setModal] = useState<ModalState>(defaultModal);
+
+  // Holds latest form values from PaymentFormMock without causing re-renders
+  const formValuesRef = React.useRef<{ tab: 'card' | 'upi'; cardNumber: string; upiId: string }>({
+    tab: 'card', cardNumber: '', upiId: '',
+  });
+
+  const validatePaymentForm = () => {
+    const { tab, cardNumber, upiId } = formValuesRef.current;
+    if (tab === 'card') return cardNumber.replace(/\s/g, '') === TEST_CARD;
+    return upiId.trim().toLowerCase() === TEST_UPI.toLowerCase();
+  };
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -152,6 +169,10 @@ export default function Pricing() {
   const processTopUp = async () => {
     const token = localStorage.getItem('token');
     if (!token) return;
+    if (!validatePaymentForm()) {
+      alert('❌ Invalid payment details.\n\nPlease use the test credentials provided to you.');
+      return;
+    }
     setModal(p => ({ ...p, step: 'processing' }));
     await new Promise(r => setTimeout(r, 1500));
     try {
@@ -176,6 +197,10 @@ export default function Pricing() {
   const processPlanUpgrade = async () => {
     const token = localStorage.getItem('token');
     if (!token) return;
+    if (!validatePaymentForm()) {
+      alert('❌ Invalid payment details.\n\nPlease use the test credentials provided to you.');
+      return;
+    }
     setModal(p => ({ ...p, step: 'processing' }));
     await new Promise(r => setTimeout(r, 1500));
     try {
@@ -382,7 +407,7 @@ export default function Pricing() {
                     </div>
 
                     {/* Dummy Payment Form — tabbed */}
-                    <PaymentFormMock />
+                    <PaymentFormMock onFormChange={(vals) => { formValuesRef.current = vals; }} />
 
                     <div className="flex justify-between items-center pt-4 border-t border-black/5 mb-6">
                       <span className="text-neutral-900 font-semibold">
@@ -458,10 +483,16 @@ export default function Pricing() {
 }
 
 // ─── Mock Payment Form Component ─────────────────────────────────────────────
-function PaymentFormMock() {
+function PaymentFormMock({ onFormChange }: { onFormChange: (vals: { tab: 'card' | 'upi'; cardNumber: string; upiId: string }) => void }) {
   const [tab, setTab] = useState<'card' | 'upi'>('card');
-  const [upiId, setUpiId] = useState('demo@upi');
+  const [cardNumber, setCardNumber] = useState('');
+  const [upiId, setUpiId] = useState('');
   const [bank, setBank] = useState('sbi');
+
+  // Notify parent whenever form values change
+  React.useEffect(() => {
+    onFormChange({ tab, cardNumber, upiId });
+  }, [tab, cardNumber, upiId, onFormChange]);
 
   return (
     <div className="text-left mb-6">
@@ -505,7 +536,14 @@ function PaymentFormMock() {
           <div>
             <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">Card Number</label>
             <div className="relative">
-              <input type="text" defaultValue="4242 4242 4242 4242" className="w-full h-11 pl-10 pr-4 rounded-xl border border-neutral-200 bg-neutral-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all" />
+              <input
+                type="text"
+                value={cardNumber}
+                onChange={e => setCardNumber(e.target.value)}
+                placeholder="Enter card number"
+                maxLength={19}
+                className="w-full h-11 pl-10 pr-4 rounded-xl border border-neutral-200 bg-neutral-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+              />
               <CreditCard className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             </div>
           </div>

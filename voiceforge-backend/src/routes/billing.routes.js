@@ -1,5 +1,5 @@
 const express = require('express');
-const { createPaymentIntent, verifyPayment, dummyTopUp, upgradePlan, getPlanConfig } = require('../controllers/billing.controller');
+const { createPaymentIntent, verifyPayment, dummyTopUp, upgradePlan, getPlanConfig, getTransactions } = require('../controllers/billing.controller');
 const { verifyToken } = require('../middlewares/auth.middleware');
 
 const router = express.Router();
@@ -13,5 +13,6 @@ router.post('/create-payment-intent', createPaymentIntent);
 router.post('/verify', verifyPayment);
 router.post('/dummy-topup', dummyTopUp);
 router.post('/upgrade-plan', upgradePlan);
+router.get('/transactions', getTransactions);
 
 module.exports = router;

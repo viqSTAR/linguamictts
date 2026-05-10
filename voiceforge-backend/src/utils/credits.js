@@ -15,9 +15,9 @@ const getMonthKey = (date) => {
  * Rules:
  *  1. Runs at most once per calendar month (idempotent via MONTHLY_RESET log).
  *  2. Addon credits (addonCredits field) are PERMANENT — never touched here.
- *  3. Monthly reset = ensure plan credits are at least planMonthlyCredits.
+ *  3. Monthly reset = set plan credits to the monthly allocation.
  *     Formula: target = planMonthlyCredits + addonCredits
- *     We only ADD the deficit — never reduce. Surplus plan credits carry forward.
+ *     Add-on credits are permanent. Plan credits do not carry forward.
  */
 const ensureMonthlyCredits = async (userId) => {
   const monthKey = getMonthKey(new Date());
@@ -57,18 +57,16 @@ const ensureMonthlyCredits = async (userId) => {
         planAllocation = FIRST_MONTH_CREDITS;
       }
 
-      // The floor is: addon credits + plan allocation
-      // We only top up to this floor — never reduce.
-      // This means surplus plan credits carry forward naturally.
-      const floor = planAllocation + addonCredits;
-      const delta = Math.max(0, floor - user.creditsBalance);
+      // Reset plan credits to the monthly allocation, preserving add-on credits.
+      const targetBalance = planAllocation + addonCredits;
+      const delta = targetBalance - user.creditsBalance;
 
       let updatedBalance = user.creditsBalance;
 
-      if (delta > 0) {
+      if (delta !== 0) {
         const updatedUser = await tx.user.update({
           where: { id: userId },
-          data: { creditsBalance: { increment: delta } },
+          data: { creditsBalance: targetBalance },
         });
         updatedBalance = updatedUser.creditsBalance;
       }

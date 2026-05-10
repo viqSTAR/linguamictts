@@ -74,6 +74,13 @@ const PLAN_CREDITS: Record<string, number> = {
   PRO: 850000,
 };
 
+const PLAN_RANK: Record<string, number> = {
+  FREE: 0,
+  STARTER: 1,
+  CREATOR: 2,
+  PRO: 3,
+};
+
 const TOPUP_TIERS = [
   { amountUSD: 1,  credits: 5000  },
   { amountUSD: 5,  credits: 25000 },
@@ -209,15 +216,24 @@ export default function Pricing() {
         </motion.div>
 
         <div className="grid lg:grid-cols-4 md:grid-cols-2 gap-6 w-full">
-          {PLAN_DEFINITIONS.map((plan, index) => {
+          {PLAN_DEFINITIONS.map((plan) => {
             const isCurrent = currentPlan === plan.key;
             const isFreePlan = plan.key === 'FREE';
+            const currentRank = PLAN_RANK[currentPlan] ?? 0;
+            const planRank = PLAN_RANK[plan.key] ?? 0;
+            const isLowerPlan = isLoggedIn && currentRank > planRank;
 
             let ctaButton;
             if (isCurrent) {
               ctaButton = (
                 <div className={`w-full h-12 rounded-full font-semibold flex items-center justify-center mb-8 relative z-10 bg-green-500/20 text-green-700 border border-green-300`}>
                   ✓ Current Plan
+                </div>
+              );
+            } else if (isLowerPlan) {
+              ctaButton = (
+                <div className="w-full h-12 rounded-full font-semibold flex items-center justify-center mb-8 relative z-10 bg-neutral-100 text-neutral-400 border border-neutral-200 cursor-not-allowed">
+                  Upgrade only
                 </div>
               );
             } else if (isFreePlan) {

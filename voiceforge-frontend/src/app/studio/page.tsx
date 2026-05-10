@@ -26,6 +26,15 @@ type UserProfile = {
   creditsBalance?: number;
 };
 
+type CreditTransaction = {
+  id: string;
+  amount: number;
+  type: string;
+  description?: string | null;
+  referenceId?: string | null;
+  createdAt: string;
+};
+
 export default function Studio() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('playground');
@@ -1107,6 +1116,28 @@ function BillingView({ user }: { user: UserProfile | null }) {
   const hasTopUpSurplus    = balance > monthlyAllocation;
   const isPro              = theme.isPro === true;
 
+  const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
+  const [txLoading, setTxLoading] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    setTxLoading(true);
+    api.get('/billing/transactions?limit=10')
+      .then((res) => {
+        if (!isMounted) return;
+        setTransactions(res.data.transactions || []);
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setTransactions([]);
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setTxLoading(false);
+      });
+    return () => { isMounted = false; };
+  }, []);
+
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
 
@@ -1247,6 +1278,41 @@ function BillingView({ user }: { user: UserProfile | null }) {
           )}
         </motion.div>
       </div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+        className={`mt-6 rounded-2xl border p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ${theme.usageCardBg} ${theme.usageCardBorder}`}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <div className={`text-[11px] font-bold uppercase tracking-widest ${theme.usageAccent}`}>Transaction History</div>
+          <div className={`text-[11px] font-medium px-3 py-1 rounded-full ${theme.isDark ? 'bg-white/10 text-neutral-400' : 'bg-neutral-100 text-neutral-400'}`}>
+            Last 10
+          </div>
+        </div>
+
+        {txLoading ? (
+          <div className="flex items-center gap-2 text-sm text-neutral-500">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading transactions...
+          </div>
+        ) : transactions.length === 0 ? (
+          <div className="text-sm text-neutral-500">No transactions yet.</div>
+        ) : (
+          <div className="space-y-3">
+            {transactions.map((tx) => (
+              <div key={tx.id} className={`flex flex-col md:flex-row md:items-center md:justify-between gap-2 rounded-xl border p-4 ${theme.trackBg}`}>
+                <div>
+                  <div className={`text-sm font-semibold ${theme.usageText}`}>{tx.type.replace(/_/g, ' ')}</div>
+                  <div className={`text-xs ${theme.usageSub}`}>{tx.description || 'Credit transaction'}</div>
+                  <div className={`text-[10px] ${theme.usageSub}`}>{new Date(tx.createdAt).toLocaleString()}</div>
+                </div>
+                <div className={`text-sm font-bold ${tx.amount >= 0 ? theme.usageAccent : 'text-red-500'}`}>
+                  {tx.amount >= 0 ? '+' : ''}{tx.amount.toLocaleString()} credits
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </motion.div>
     </motion.div>
   );
 }

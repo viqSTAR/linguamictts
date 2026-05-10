@@ -27,6 +27,31 @@ const getTopUpCredits = (amountUSD) => {
   return tier ? tier.credits : Math.round(amountUSD * 5000);
 };
 
+// ─── Transaction History (credits) ─────────────────────────────────────────
+const getTransactions = async (req, res) => {
+  try {
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+    const transactions = await prisma.creditTransaction.findMany({
+      where: { userId: req.userId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        amount: true,
+        type: true,
+        description: true,
+        referenceId: true,
+        createdAt: true,
+      },
+    });
+
+    res.json({ transactions });
+  } catch (error) {
+    console.error('Transaction History Error:', error);
+    res.status(500).json({ error: 'Failed to fetch transaction history' });
+  }
+};
+
 // ─── Stripe: Create Payment Intent ────────────────────────────────────────────
 const createPaymentIntent = async (req, res) => {
   try {
@@ -239,4 +264,5 @@ module.exports = {
   dummyTopUp,
   upgradePlan,
   getPlanConfig,
+  getTransactions,
 };

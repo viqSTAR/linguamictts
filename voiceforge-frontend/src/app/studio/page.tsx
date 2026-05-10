@@ -1310,7 +1310,7 @@ function BillingView({ user }: { user: UserProfile | null }) {
 
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
           <div>
-            <div className={`text-[11px] font-bold uppercase tracking-widest ${theme.usageAccent}`}>Cancel Plan</div>
+            <div className={`text-[11px] font-bold uppercase tracking-widest ${theme.usageAccent}`}>Cancel Subscription</div>
             <p className={`text-sm ${theme.usageSub}`}>Cancel your subscription renewal at the end of the billing cycle.</p>
           </div>
           <button
@@ -1318,7 +1318,7 @@ function BillingView({ user }: { user: UserProfile | null }) {
             onClick={() => setRefundModal({ open: true, step: 'confirm' })}
             className="h-11 px-4 rounded-full font-semibold text-sm border border-red-200 text-red-600 hover:bg-red-50 transition-all"
           >
-            Request Refund
+            Cancel Subscription
           </button>
         </div>
 
@@ -1375,8 +1375,8 @@ function BillingView({ user }: { user: UserProfile | null }) {
                       <CreditCard className="w-5 h-5 text-orange-500" />
                     </div>
                     <div>
-                      <h4 className="font-bold text-neutral-900">Refund request</h4>
-                      <p className="text-xs text-neutral-400">Confirm you want to request a refund.</p>
+                      <h4 className="font-bold text-neutral-900">Cancel subscription</h4>
+                      <p className="text-xs text-neutral-400">Confirm you want to cancel your subscription.</p>
                     </div>
                   </div>
                   <p className="text-sm text-neutral-600 mb-6">
@@ -1395,7 +1395,7 @@ function BillingView({ user }: { user: UserProfile | null }) {
                       onClick={() => setRefundModal({ open: true, step: 'submitted' })}
                       className="flex-1 py-3 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-500 text-white text-sm font-semibold shadow-[0_6px_18px_rgba(249,115,22,0.3)] transition-all"
                     >
-                      Confirm refund
+                      Confirm cancellation
                     </button>
                   </div>
                 </>
@@ -1406,12 +1406,12 @@ function BillingView({ user }: { user: UserProfile | null }) {
                       <CheckCircle2 className="w-5 h-5 text-green-600" />
                     </div>
                     <div>
-                      <h4 className="font-bold text-neutral-900">Request submitted</h4>
+                      <h4 className="font-bold text-neutral-900">Cancellation submitted</h4>
                       <p className="text-xs text-neutral-400">Our team will review your eligibility.</p>
                     </div>
                   </div>
                   <p className="text-sm text-neutral-600 mb-6">
-                    We will email you if the refund is approved.
+                    We will email you if a refund is approved.
                   </p>
                   <button
                     type="button"

@@ -216,7 +216,7 @@ export default function Pricing() {
         </motion.div>
 
         <div className="grid lg:grid-cols-4 md:grid-cols-2 gap-6 w-full">
-          {PLAN_DEFINITIONS.map((plan) => {
+          {PLAN_DEFINITIONS.map((plan, index) => {
             const isCurrent = currentPlan === plan.key;
             const isFreePlan = plan.key === 'FREE';
             const currentRank = PLAN_RANK[currentPlan] ?? 0;

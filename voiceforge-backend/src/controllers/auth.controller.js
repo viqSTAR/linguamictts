@@ -131,6 +131,7 @@ const getMe = async (req, res) => {
         createdAt: true,
         lastAudioUrl: true,
         lastAudioMp3Url: true,
+        lastAudioUpdatedAt: true,
       }
     });
     
@@ -140,7 +141,8 @@ const getMe = async (req, res) => {
     
     res.json({ user });
   } catch (error) {
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('GetMe error:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 };
 

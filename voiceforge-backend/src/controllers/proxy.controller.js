@@ -5,7 +5,7 @@ const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
 const ffmpegPath = require('ffmpeg-static');
-const { r2Enabled, buildAudioKey, uploadAudioBuffer, deleteAudioObject } = require('../utils/r2');
+const { r2Enabled, buildAudioKey, uploadAudioBuffer, deleteAudioObject, getAudioObject } = require('../utils/r2');
 
 const FASTAPI_URL = process.env.FASTAPI_URL || 'http://localhost:8000';
 const FASTAPI_INTERNAL_KEY = process.env.FASTAPI_INTERNAL_KEY || 'default_dev_key';
@@ -349,6 +349,8 @@ const proxyStudioTTS = async (req, res) => {
           mp3Key = buildAudioKey(req.userId, 'mp3');
           const mp3Result = await uploadAudioBuffer({ buffer: mp3Buffer, key: mp3Key, contentType: 'audio/mpeg' });
           mp3Url = mp3Result.publicUrl;
+        } else {
+          console.warn('MP3 conversion skipped: ffmpeg unavailable.');
         }
 
         await prisma.user.update({
@@ -469,11 +471,54 @@ const proxyStudioSTT = async (req, res) => {
   }
 };
 
+const proxyStudioDownload = async (req, res) => {
+  try {
+    if (!r2Enabled) {
+      return res.status(400).json({ error: 'Audio storage not configured.' });
+    }
+
+    const format = String(req.query.format || 'wav').toLowerCase();
+    const isMp3 = format === 'mp3';
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.userId },
+      select: { lastAudioKey: true, lastAudioMp3Key: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    const key = isMp3 ? user.lastAudioMp3Key : user.lastAudioKey;
+    if (!key) {
+      return res.status(404).json({ error: 'No audio available for download.' });
+    }
+
+    const object = await getAudioObject(key);
+    if (!object || !object.Body) {
+      return res.status(404).json({ error: 'Audio file missing.' });
+    }
+
+    const filename = isMp3 ? 'linguamic-audio.mp3' : 'linguamic-audio.wav';
+    res.setHeader('Content-Type', object.ContentType || (isMp3 ? 'audio/mpeg' : 'audio/wav'));
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    if (object.ContentLength) {
+      res.setHeader('Content-Length', object.ContentLength.toString());
+    }
+
+    object.Body.pipe(res);
+  } catch (error) {
+    console.error('Studio download error:', error.message);
+    res.status(500).json({ error: 'Failed to download audio.' });
+  }
+};
+
 module.exports = {
   proxyTTS,
   proxySTT,
   proxyVoices,
   proxyStudioTTS,
   proxyStudioSTT,
+  proxyStudioDownload,
   proxyDemoTTS,
 };

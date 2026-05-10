@@ -8,7 +8,7 @@ import logo from '@/assets/linguamicorange copy.png';
 import { 
   Mic2, CreditCard, Settings, LogOut, 
   Download, ChevronDown, Sparkles, Loader2, Wand2, SlidersHorizontal, Activity,
-  User, CheckCircle2
+  User, CheckCircle2, RefreshCw
 } from 'lucide-react';
 import api from '@/lib/api';
 
@@ -24,6 +24,9 @@ type UserProfile = {
   plan?: string;
   planMonthlyCredits?: number;
   creditsBalance?: number;
+  lastAudioUpdatedAt?: string | null;
+  lastAudioUrl?: string | null;
+  lastAudioMp3Url?: string | null;
 };
 
 type CreditTransaction = {
@@ -161,6 +164,8 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
   const [cloudWavUrl, setCloudWavUrl] = useState<string | null>(null);
   const [cloudMp3Url, setCloudMp3Url] = useState<string | null>(null);
   const [cloudReady, setCloudReady] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState<'idle' | 'pending' | 'ready' | 'error'>('idle');
+  const generationStartRef = useRef<number>(0);
   
   // STT State
   const [sttMode, setSttMode] = useState<'tts' | 'stt'>('tts');
@@ -172,6 +177,7 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
   const [recordingTime, setRecordingTime] = useState(0);
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
+  const [recordingDuration, setRecordingDuration] = useState(0);
   const [showConfirm, setShowConfirm] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
@@ -282,6 +288,8 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
     setCloudWavUrl(null);
     setCloudMp3Url(null);
     setCloudReady(false);
+    setCloudStatus('pending');
+    generationStartRef.current = Date.now();
     
     // Initialize Audio Context for streaming playback
     if (!audioContextRef.current) {
@@ -453,23 +461,74 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
       const res = await api.get('/auth/me');
       const nextWav = res.data.user?.lastAudioUrl || null;
       const nextMp3 = res.data.user?.lastAudioMp3Url || null;
-      if (nextWav || nextMp3) {
+      const updatedAtRaw = res.data.user?.lastAudioUpdatedAt || null;
+      const updatedAt = updatedAtRaw ? new Date(updatedAtRaw).getTime() : 0;
+
+      if ((nextWav || nextMp3) && updatedAt >= generationStartRef.current) {
         setCloudWavUrl(nextWav);
         setCloudMp3Url(nextMp3);
         setCloudReady(true);
+        if (nextMp3) {
+          setCloudStatus('ready');
+        }
         return true;
       }
       return false;
     };
 
-    for (let i = 0; i < 3; i += 1) {
+    for (let i = 0; i < 10; i += 1) {
       try {
         const ok = await attemptFetch();
         if (ok) break;
       } catch {
         // ignore retry errors
       }
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+    if (!cloudReady) {
+      setCloudStatus('idle');
+    }
+  };
+
+  const triggerDownloadFromBlobUrl = (blobUrl: string, filename: string) => {
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = filename;
+    link.rel = 'noopener';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
+  const handleDirectDownload = async ({
+    format,
+    fallbackUrl,
+    filename,
+  }: {
+    format: 'wav' | 'mp3';
+    fallbackUrl?: string | null;
+    filename: string;
+  }) => {
+    if (fallbackUrl && fallbackUrl.startsWith('blob:')) {
+      triggerDownloadFromBlobUrl(fallbackUrl, filename);
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token') || '';
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+      const res = await fetch(`${apiUrl}/v1/studio/download?format=${format}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) throw new Error('Download failed');
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      triggerDownloadFromBlobUrl(blobUrl, filename);
+      URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error('Direct download failed', error);
+      alert('Download failed. Please try again.');
     }
   };
 
@@ -513,14 +572,25 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: true,
           sampleRate: 48000,
           channelCount: 1,
         }
       });
+      setRecordedBlob(null);
+      setRecordingUrl(null);
+      setRecordingDuration(0);
+      setRecordingTime(0);
       chunksRef.current = [];
-      const mr = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+      const preferredMime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm';
+      const mr = new MediaRecorder(stream, {
+        mimeType: preferredMime,
+        audioBitsPerSecond: 192000,
+      });
       mediaRecorderRef.current = mr;
 
       // Live visualizer via analyser
@@ -543,9 +613,21 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
       vizLoop();
 
       mr.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      mr.onstart = () => {
+        setIsRecording(true);
+        setRecordingTime(0);
+        if (timerRef.current) clearInterval(timerRef.current);
+        timerRef.current = setInterval(() => setRecordingTime(t => t + 1), 1000);
+      };
       mr.onstop = () => {
         stream.getTracks().forEach(t => t.stop());
         ctx.close();
+        if (timerRef.current) clearInterval(timerRef.current);
+        setIsRecording(false);
+        if (chunksRef.current.length === 0) {
+          alert('No audio captured. Please try again.');
+          return;
+        }
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
         const url = URL.createObjectURL(blob);
         setRecordedBlob(blob);
@@ -554,18 +636,18 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
         setVizBars(Array(20).fill(4));
       };
 
-      mr.start(250);
-      setIsRecording(true);
-      setRecordingTime(0);
-      timerRef.current = setInterval(() => setRecordingTime(t => t + 1), 1000);
+      mr.start();
     } catch {
       alert('Could not access microphone. Please allow microphone permission.');
     }
   };
 
   const stopRecording = () => {
-    mediaRecorderRef.current?.stop();
-    setIsRecording(false);
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state === 'recording') {
+      recorder.requestData();
+      recorder.stop();
+    }
     if (timerRef.current) clearInterval(timerRef.current);
   };
 
@@ -762,15 +844,31 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
                       </div>
                       {recordingUrl && (
                         <div className="bg-neutral-50 border border-black/5 rounded-2xl p-4 mb-6">
-                          <audio controls src={recordingUrl} className="w-full h-10 rounded-lg" />
+                          <audio
+                            controls
+                            src={recordingUrl}
+                            className="w-full h-10 rounded-lg"
+                            onLoadedMetadata={(event) => {
+                              const duration = event.currentTarget.duration;
+                              if (Number.isFinite(duration)) {
+                                setRecordingDuration(Math.round(duration));
+                              }
+                            }}
+                          />
                           <p className="text-[10px] text-neutral-400 text-center mt-2 font-medium">
-                            Duration: {formatTime(recordingTime)} · High-quality 48kHz audio
+                            Duration: {formatTime(recordingDuration || recordingTime)} · High-quality 48kHz audio
                           </p>
                         </div>
                       )}
                       <div className="flex gap-3">
                         <button
-                          onClick={() => { setShowConfirm(false); setRecordedBlob(null); setRecordingUrl(null); }}
+                          onClick={() => {
+                            setShowConfirm(false);
+                            setRecordedBlob(null);
+                            setRecordingUrl(null);
+                            setRecordingDuration(0);
+                            setRecordingTime(0);
+                          }}
                           className="flex-1 py-3 rounded-2xl border border-black/10 text-sm font-semibold text-neutral-600 hover:bg-neutral-50 transition-all"
                         >
                           🔄 Re-record
@@ -803,33 +901,53 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
                   {/* Background decorative blob */}
                   <div className="absolute -right-10 -top-10 w-32 h-32 bg-orange-400/10 blur-3xl rounded-full pointer-events-none" />
                   
-                  <div className="flex flex-col md:flex-row items-center justify-between gap-4 relative z-10">
-                    <div className="flex-1 w-full">
+                  <div className="flex flex-col gap-4 relative z-10">
+                    <div className="w-full">
                       <audio controls src={audioUrl} className="w-full h-12 rounded-lg" />
                     </div>
-                  <div className="flex flex-col md:flex-row items-center gap-3 shrink-0">
-                    <a
-                      href={cloudWavUrl || audioUrl}
-                      download="linguamic-audio.wav"
-                      className="bg-orange-500 text-white flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold shadow-[0_4px_14px_rgba(249,115,22,0.3)] hover:bg-orange-600 transition-all hover:scale-[1.02] active:scale-[0.98]"
-                    >
-                      <Download className="w-4 h-4" /> Download WAV
-                    </a>
-                    <a
-                      href={cloudMp3Url || '#'}
-                      download="linguamic-audio.mp3"
-                      className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.12)] transition-all ${cloudMp3Url ? 'bg-neutral-900 text-white hover:bg-neutral-800' : 'bg-neutral-200 text-neutral-400 cursor-not-allowed'}`}
-                      onClick={(event) => {
-                        if (!cloudMp3Url) event.preventDefault();
-                      }}
-                    >
-                      <Download className="w-4 h-4" /> Download MP3
-                    </a>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => handleDirectDownload({
+                          format: 'wav',
+                          fallbackUrl: audioUrl,
+                          filename: 'linguamic-audio.wav',
+                        })}
+                        className="bg-orange-500 text-white flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold shadow-[0_4px_14px_rgba(249,115,22,0.3)] hover:bg-orange-600 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                      >
+                        <Download className="w-4 h-4" /> Download WAV
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (cloudMp3Url) {
+                            handleDirectDownload({
+                              format: 'mp3',
+                              filename: 'linguamic-audio.mp3',
+                            });
+                          }
+                        }}
+                        className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.12)] transition-all ${cloudMp3Url ? 'bg-neutral-900 text-white hover:bg-neutral-800' : 'bg-neutral-200 text-neutral-400 cursor-not-allowed'}`}
+                        aria-disabled={!cloudMp3Url}
+                      >
+                        <Download className="w-4 h-4" /> Download MP3
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCloudStatus('pending');
+                          refreshCloudUrls();
+                        }}
+                        className="h-10 w-10 rounded-full border border-neutral-200 text-neutral-600 hover:bg-white flex items-center justify-center"
+                        aria-label="Refresh cloud links"
+                      >
+                        <RefreshCw className={`w-4 h-4 ${cloudStatus === 'pending' ? 'animate-spin' : ''}`} />
+                      </button>
+                      {cloudStatus === 'pending' && !cloudMp3Url && (
+                        <p className="text-[10px] text-neutral-400">MP3 is processing. WAV download is ready.</p>
+                      )}
+                    </div>
                   </div>
-                  {!cloudReady && (
-                    <p className="text-[10px] text-neutral-400 mt-3">Cloud download links will appear shortly.</p>
-                  )}
-                </div>
               </div>
             ) : isPlaying ? (
               <div className="border-2 border-orange-200 bg-orange-50/50 rounded-2xl p-10 flex flex-col items-center justify-center text-center shadow-inner relative overflow-hidden">

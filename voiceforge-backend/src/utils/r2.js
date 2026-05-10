@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 
 const {
   R2_ENDPOINT,
@@ -57,9 +57,21 @@ const deleteAudioObject = async (key) => {
   );
 };
 
+const getAudioObject = async (key) => {
+  if (!r2Client || !key) return null;
+  const result = await r2Client.send(
+    new GetObjectCommand({
+      Bucket: R2_BUCKET,
+      Key: key,
+    })
+  );
+  return result;
+};
+
 module.exports = {
   r2Enabled,
   buildAudioKey,
   uploadAudioBuffer,
   deleteAudioObject,
+  getAudioObject,
 };

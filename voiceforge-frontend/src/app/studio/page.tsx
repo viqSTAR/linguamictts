@@ -180,6 +180,10 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [showConfirm, setShowConfirm] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  
+  // Preset Modal State
+  const [savePresetModal, setSavePresetModal] = useState(false);
+  const [presetNameInput, setPresetNameInput] = useState('');
   const chunksRef = useRef<BlobPart[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [vizBars, setVizBars] = useState<number[]>(Array(20).fill(4));
@@ -284,18 +288,23 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
     }
   };
 
-  const saveCustomPreset = async () => {
+  const openSavePresetModal = () => {
     if (!user) return;
     const presets = user.presets || [];
     if (presets.length >= 3) {
       alert('You can only save up to 3 custom presets. Please delete one first.');
       return;
     }
-    
-    const presetName = prompt('Enter a name for this preset:');
-    if (!presetName || !presetName.trim()) return;
+    setPresetNameInput('');
+    setSavePresetModal(true);
+  };
 
-    const newPreset = { name: presetName.trim(), voice, tone, speed, temperature };
+  const confirmSavePreset = async () => {
+    if (!user) return;
+    const presets = user.presets || [];
+    if (!presetNameInput || !presetNameInput.trim()) return;
+
+    const newPreset = { name: presetNameInput.trim(), voice, tone, speed, temperature };
     const newPresets = [...presets, newPreset];
     
     try {
@@ -308,6 +317,7 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
       });
       if (res.ok) {
         setUser({ ...user, presets: newPresets });
+        setSavePresetModal(false);
       } else {
         alert('Failed to save preset.');
       }
@@ -1217,7 +1227,7 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
               <div className="flex justify-between items-end mb-3">
                 <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider">Presets</label>
                 <button 
-                  onClick={saveCustomPreset}
+                  onClick={openSavePresetModal}
                   disabled={(user?.presets?.length || 0) >= 3}
                   className="text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded-md border border-orange-100 hover:bg-orange-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
@@ -1288,6 +1298,74 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
         </div>
         )}
         </motion.div>
+
+        {/* Save Preset Modal */}
+        <AnimatePresence>
+          {savePresetModal && (
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm px-4"
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.92, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.92, y: 20 }}
+                transition={{ type: 'spring', bounce: 0.25, duration: 0.4 }}
+                className="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-md border border-black/5"
+              >
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center border border-orange-100">
+                    <SlidersHorizontal className="w-5 h-5 text-orange-500" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-neutral-900">Save Custom Preset</h4>
+                    <p className="text-xs text-neutral-400">Name your current studio settings</p>
+                  </div>
+                </div>
+                
+                <div className="mb-6">
+                  <input
+                    type="text"
+                    autoFocus
+                    placeholder="e.g. My Podcast Voice"
+                    value={presetNameInput}
+                    onChange={(e) => setPresetNameInput(e.target.value)}
+                    className="w-full bg-neutral-50 border border-neutral-200 text-neutral-900 px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/50 focus:border-orange-500 transition-all font-medium"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') confirmSavePreset();
+                    }}
+                  />
+                  
+                  <div className="mt-4 bg-orange-50/50 border border-orange-100/50 p-3 rounded-xl">
+                    <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider mb-2">Saving configuration:</p>
+                    <div className="grid grid-cols-2 gap-2 text-xs font-medium text-neutral-700">
+                      <div className="bg-white px-2 py-1.5 rounded-lg border border-black/5 shadow-sm truncate">🎙️ {voice === 'jessi' ? 'Jessi' : voice.charAt(0).toUpperCase() + voice.slice(1)}</div>
+                      <div className="bg-white px-2 py-1.5 rounded-lg border border-black/5 shadow-sm truncate">🎭 {tone || 'Neutral'}</div>
+                      <div className="bg-white px-2 py-1.5 rounded-lg border border-black/5 shadow-sm truncate">⚡ {speed.toFixed(2)}x Speed</div>
+                      <div className="bg-white px-2 py-1.5 rounded-lg border border-black/5 shadow-sm truncate">🌡️ {temperature.toFixed(2)} Temp</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setSavePresetModal(false)}
+                    className="flex-1 py-3 rounded-2xl border border-black/10 text-sm font-semibold text-neutral-600 hover:bg-neutral-50 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={confirmSavePreset}
+                    disabled={!presetNameInput.trim()}
+                    className="flex-1 py-3 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-500 text-white text-sm font-semibold shadow-[0_6px_18px_rgba(249,115,22,0.3)] transition-all flex items-center justify-center gap-2 hover:shadow-[0_8px_25px_rgba(249,115,22,0.4)] disabled:opacity-50"
+                  >
+                    Save Preset
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </AnimatePresence>
     </motion.div>
   );

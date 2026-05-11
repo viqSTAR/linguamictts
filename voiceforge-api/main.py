@@ -119,59 +119,53 @@ class TTSRequest(BaseModel):
     speed: Optional[float] = None
 
 
-# ---------------- UTIL ---------------- #
+def split_text(text, max_chars=160):
+    """Split text into chunks at natural sentence boundaries.
 
-def split_text(text, max_chars=100):
-    import re
+    Why this matters for TTS quality:
+    - Splitting mid-sentence and adding a trailing comma makes Orpheus pause unnaturally
+      at the chunk boundary, even though no pause exists in the original text.
+    - Emotion tags work best when they have full sentence context on both sides.
+      Mid-chunk emotion tags or emotion tags at the very end of a chunk misfire.
+    - Complete sentences give the model coherent semantic context, which prevents
+      speed jitter and the repetition bug (model loses its place in fragments).
+
+    Strategy:
+    1. Split at real sentence endings: . ? ! followed by whitespace
+    2. If a sentence is still very long (>max_chars), split at comma boundaries
+    3. NEVER add artificial trailing punctuation — the model inserts pauses there
+    """
     # Clean whitespace
     text = re.sub(r'\s+', ' ', text).strip()
-    words = text.split(' ')
-    
-    # Pattern matching a valid Orpheus emotion tag at the very end of a string
-    EMOTION_TAG_END = re.compile(r'<\w+>$')
+
+    # Step 1: split at real sentence boundaries (. ? ! followed by space or end-of-string)
+    raw_sentences = re.split(r'(?<=[.?!])\s+', text)
 
     chunks = []
-    current_chunk = []
-    current_len = 0
-    
-    for word in words:
-        if not word:
+    for sentence in raw_sentences:
+        sentence = sentence.strip()
+        if not sentence:
             continue
-            
-        word_len = len(word) + 1 # +1 for space
-        
-        # If adding this word exceeds max_chars
-        if current_len + word_len > max_chars and current_chunk:
-            chunk_str = " ".join(current_chunk)
-            # Add trailing comma to pad audio and prevent Orpheus clipping the last syllable.
-            # BUT: never add punctuation right after an emotion tag — Orpheus sees the period
-            # as a new token immediately after the emotion token and misinterprets the sound
-            # (e.g. <laugh>. can come out as a gasp or clipped noise).
-            if not re.search(r'[.?!,\n]$', chunk_str) and not EMOTION_TAG_END.search(chunk_str):
-                chunk_str += ","
-            chunks.append(chunk_str)
-            
-            current_chunk = [word]
-            current_len = word_len
+
+        if len(sentence) <= max_chars:
+            # Whole sentence fits — keep it intact for smooth, natural delivery
+            chunks.append(sentence)
         else:
-            current_chunk.append(word)
-            current_len += word_len
-            
-            # Break early if we hit strong punctuation and chunk is reasonably sized
-            if re.search(r'[.?!]$', word) and current_len > 40:
-                chunk_str = " ".join(current_chunk)
-                chunks.append(chunk_str)
-                current_chunk = []
-                current_len = 0
-                
-    if current_chunk:
-        chunk_str = " ".join(current_chunk)
-        # Same rule: don't add period after an emotion tag
-        if not re.search(r'[.?!,\n]$', chunk_str) and not EMOTION_TAG_END.search(chunk_str):
-            chunk_str += "."
-        chunks.append(chunk_str)
-        
-    return chunks
+            # Step 2: long sentence — split at comma boundaries
+            # Keeps emotion tags attached to the clause they precede
+            parts = re.split(r',\s+', sentence)
+            current = ''
+            for part in parts:
+                candidate = (current + ', ' + part) if current else part
+                if current and len(candidate) > max_chars:
+                    chunks.append(current)
+                    current = part
+                else:
+                    current = candidate
+            if current.strip():
+                chunks.append(current.strip())
+
+    return [c for c in chunks if c.strip()]
 
 
 def audio_to_pcm(audio):

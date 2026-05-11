@@ -38,11 +38,13 @@ app = FastAPI()
 # ---------------- CONFIG ---------------- #
 
 # Neutral defaults — balanced for natural, conversational speech
-# Higher temp than before (0.60 vs 0.35) gives natural prosody variation
-DEFAULT_TEMPERATURE = 0.60
+# Lower rep_penalty (1.10 = official Orpheus minimum) — higher values make the
+# model speak faster which causes word-skipping (e.g. "language" in "language barriers")
+DEFAULT_TEMPERATURE = 0.55
 DEFAULT_TOP_P = 0.90
-# 1.18 keeps neutral from looping/repeating phrases (was 1.1, too permissive)
-DEFAULT_REP_PENALTY = 1.18
+# 1.10 is the minimum required for stable generation per official Orpheus docs.
+# Raising above this makes speech faster but also causes word-skipping on longer sentences.
+DEFAULT_REP_PENALTY = 1.10
 
 # Tone presets — each tone has a distinct enough parameter spread so they
 # genuinely *sound* different from each other and from neutral.

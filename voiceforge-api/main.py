@@ -165,7 +165,19 @@ def split_text(text, max_chars=160):
             if current.strip():
                 chunks.append(current.strip())
 
-    return [c for c in chunks if c.strip()]
+    # Step 3: merge chunks that are too short for Orpheus to generate meaningful audio.
+    # The model needs at least 28 token frames to produce any output — very short fragments
+    # (e.g. a lone emotion tag, a one-word sentence) produce silence instead.
+    MIN_CHUNK_CHARS = 30
+    merged: list[str] = []
+    for chunk in chunks:
+        if merged and len(chunk) < MIN_CHUNK_CHARS:
+            # Attach to previous chunk — they belong to the same breath group anyway
+            merged[-1] = merged[-1] + ' ' + chunk
+        else:
+            merged.append(chunk)
+
+    return [c for c in merged if c.strip()]
 
 
 def audio_to_pcm(audio):
@@ -238,12 +250,19 @@ def generate_tts_stream(text, voice, temp, top_p, rep_pen, speed):
 
     for chunk in chunks:
 
+        # Dynamic max_tokens: default 1200 ≈ 3.6 s of audio at 24 kHz.
+        # Longer sentences need proportionally more tokens or the model stops mid-word.
+        # Formula: each character of text ≈ 22 LLM audio tokens at normal speaking pace.
+        # Minimum 1200 for short phrases; hard cap at 8000 to avoid LM Studio timeouts.
+        max_tokens = min(max(1200, len(chunk) * 22), 8000)
+
         audio = generate_speech_from_api(
             prompt=chunk,
             voice=voice,
             temperature=temp,
             top_p=top_p,
             repetition_penalty=rep_pen,
+            max_tokens=max_tokens,
         )
 
         pcm = audio_to_pcm(audio)

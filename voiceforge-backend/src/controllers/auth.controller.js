@@ -132,6 +132,7 @@ const getMe = async (req, res) => {
         lastAudioUrl: true,
         lastAudioMp3Url: true,
         lastAudioUpdatedAt: true,
+        presets: true,
       }
     });
     
@@ -242,14 +243,34 @@ const googleAuth = async (req, res) => {
 
 const updateMe = async (req, res) => {
   try {
-    const { name } = req.body;
-    if (!name || typeof name !== 'string' || !name.trim()) {
-      return res.status(400).json({ error: 'Name is required' });
+    const { name, presets } = req.body;
+    const data = {};
+
+    if (name !== undefined) {
+      if (typeof name !== 'string' || !name.trim()) {
+        return res.status(400).json({ error: 'Name cannot be empty' });
+      }
+      data.name = name.trim();
     }
+
+    if (presets !== undefined) {
+      if (!Array.isArray(presets)) {
+        return res.status(400).json({ error: 'Presets must be an array' });
+      }
+      if (presets.length > 3) {
+        return res.status(400).json({ error: 'Maximum 3 presets allowed' });
+      }
+      data.presets = presets;
+    }
+
+    if (Object.keys(data).length === 0) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+
     const updatedUser = await prisma.user.update({
       where: { id: req.userId },
-      data: { name: name.trim() },
-      select: { id: true, email: true, name: true, creditsBalance: true, addonCredits: true, plan: true, planMonthlyCredits: true },
+      data,
+      select: { id: true, email: true, name: true, creditsBalance: true, addonCredits: true, plan: true, planMonthlyCredits: true, presets: true },
     });
     res.json({ user: updatedUser });
   } catch (error) {

@@ -27,6 +27,7 @@ type UserProfile = {
   lastAudioUpdatedAt?: string | null;
   lastAudioUrl?: string | null;
   lastAudioMp3Url?: string | null;
+  presets?: { name: string; voice: string; tone: string; speed: number; temperature: number }[];
 };
 
 type CreditTransaction = {
@@ -280,6 +281,60 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
       handleToneChange('calm');
     } else if (presetName === 'Action') {
       handleToneChange('adventurous');
+    }
+  };
+
+  const saveCustomPreset = async () => {
+    if (!user) return;
+    const presets = user.presets || [];
+    if (presets.length >= 3) {
+      alert('You can only save up to 3 custom presets. Please delete one first.');
+      return;
+    }
+    
+    const presetName = prompt('Enter a name for this preset:');
+    if (!presetName || !presetName.trim()) return;
+
+    const newPreset = { name: presetName.trim(), voice, tone, speed, temperature };
+    const newPresets = [...presets, newPreset];
+    
+    try {
+      const token = localStorage.getItem('token');
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+      const res = await fetch(`${API_URL}/auth/me`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ presets: newPresets }),
+      });
+      if (res.ok) {
+        setUser({ ...user, presets: newPresets });
+      } else {
+        alert('Failed to save preset.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Network error saving preset.');
+    }
+  };
+
+  const deleteCustomPreset = async (index: number) => {
+    if (!user || !user.presets) return;
+    if (!confirm('Delete this preset?')) return;
+    
+    const newPresets = user.presets.filter((_, i) => i !== index);
+    try {
+      const token = localStorage.getItem('token');
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+      const res = await fetch(`${API_URL}/auth/me`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ presets: newPresets }),
+      });
+      if (res.ok) {
+        setUser({ ...user, presets: newPresets });
+      }
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -1159,14 +1214,50 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
 
             {/* Presets */}
             <div className="mb-6 pt-6 border-t border-black/5">
-              <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Quick Presets</label>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="flex justify-between items-end mb-3">
+                <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider">Presets</label>
+                <button 
+                  onClick={saveCustomPreset}
+                  disabled={(user?.presets?.length || 0) >= 3}
+                  className="text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded-md border border-orange-100 hover:bg-orange-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  + Save Current
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-3 mb-3">
                 {['Vibey', 'Relaxed', 'Action'].map(p => (
-                  <button key={p} onClick={() => applyPreset(p)} className="px-3 py-2.5 bg-white hover:bg-orange-50 hover:text-orange-600 hover:border-orange-200 border border-black/5 rounded-xl text-sm font-semibold text-neutral-600 transition-all shadow-sm active:scale-95">
+                  <button key={p} onClick={() => applyPreset(p)} className="px-3 py-2 border border-black/5 rounded-xl text-sm font-semibold text-neutral-600 transition-all shadow-sm hover:border-orange-300 hover:bg-orange-50 hover:text-orange-600 active:scale-95 text-center">
                     {p}
                   </button>
                 ))}
               </div>
+              {user?.presets && user.presets.length > 0 && (
+                <div className="space-y-2 mt-4 pt-4 border-t border-black/5">
+                  <label className="block text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">My Custom Presets</label>
+                  {user.presets.map((p, idx) => (
+                    <div key={idx} className="flex gap-2">
+                      <button 
+                        onClick={() => {
+                          setVoice(p.voice);
+                          setTone(p.tone);
+                          setSpeed(p.speed);
+                          setTemperature(p.temperature);
+                        }} 
+                        className="flex-1 px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-xl text-sm font-semibold text-white transition-all shadow-sm hover:bg-neutral-800 active:scale-95 text-left truncate"
+                      >
+                        {p.name}
+                      </button>
+                      <button 
+                        onClick={() => deleteCustomPreset(idx)}
+                        className="px-3 py-2 border border-red-200 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-colors"
+                        title="Delete Preset"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Tuning Toggle */}

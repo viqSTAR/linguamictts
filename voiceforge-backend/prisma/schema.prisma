@@ -26,6 +26,7 @@ model User {
   apiKeys            ApiKey[]
   transactions       CreditTransaction[]
   usageLogs          UsageLog[]
+  presets            Json?               @default("[]")
 }
 
 model ApiKey {

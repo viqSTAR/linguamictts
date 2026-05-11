@@ -141,7 +141,23 @@ def split_text(text, max_chars=160):
     # Step 1: split at real sentence boundaries (. ? ! followed by space or end-of-string)
     raw_sentences = re.split(r'(?<=[.?!])\s+', text)
 
-    chunks = []
+    # Step 1b: emotion-context merge.
+    # Orpheus needs SPOKEN TEXT before an emotion tag to generate it correctly.
+    # A <laugh> or <cough> at the very start of a chunk (nothing spoken before it)
+    # causes the model to misfire — it produces a gasp-like sound instead.
+    # Fix: if a sentence starts with an emotion tag, attach it to the end of the
+    # previous sentence so the tag has preceding speech context.
+    emotion_merged: list[str] = []
+    for s in raw_sentences:
+        s = s.strip()
+        if not s:
+            continue
+        if emotion_merged and _EMOTION_TAG_RE.match(s):
+            emotion_merged[-1] = emotion_merged[-1] + ' ' + s
+        else:
+            emotion_merged.append(s)
+    raw_sentences = emotion_merged
+
     for sentence in raw_sentences:
         sentence = sentence.strip()
         if not sentence:
@@ -234,8 +250,9 @@ def generate_tts_stream(text, voice, temp, top_p, rep_pen, speed):
 
     chunks = split_text(text)
 
-    # Yield a dummy WAV header with unknown size (0xFFFFFFFF)
     import struct
+    import concurrent.futures
+
     def create_wav_header(sample_rate=SAMPLE_RATE, channels=1, sampwidth=2):
         header = b"RIFF\xff\xff\xff\xffWAVEfmt \x10\x00\x00\x00\x01\x00"
         header += struct.pack("<H", channels)
@@ -248,14 +265,9 @@ def generate_tts_stream(text, voice, temp, top_p, rep_pen, speed):
 
     yield create_wav_header()
 
-    for chunk in chunks:
-
-        # Dynamic max_tokens: default 1200 ≈ 3.6 s of audio at 24 kHz.
-        # Longer sentences need proportionally more tokens or the model stops mid-word.
-        # Formula: each character of text ≈ 22 LLM audio tokens at normal speaking pace.
-        # Minimum 1200 for short phrases; hard cap at 8000 to avoid LM Studio timeouts.
+    def _generate_chunk(chunk: str) -> bytes:
+        """Generate and speed-adjust PCM for a single text chunk."""
         max_tokens = min(max(1200, len(chunk) * 22), 8000)
-
         audio = generate_speech_from_api(
             prompt=chunk,
             voice=voice,
@@ -264,16 +276,23 @@ def generate_tts_stream(text, voice, temp, top_p, rep_pen, speed):
             repetition_penalty=rep_pen,
             max_tokens=max_tokens,
         )
-
         pcm = audio_to_pcm(audio)
-
         if not pcm:
-            continue
+            return b''
+        return apply_speed(pcm, speed)
 
-        pcm = apply_speed(pcm, speed)
-        
-        # Yield the raw PCM chunk directly
-        yield pcm
+    # Pre-generate the next chunk in a background thread while the current chunk
+    # is being yielded to the client.  This eliminates the inter-chunk silence gap
+    # that occurs when sequential generation finishes before the next chunk is ready.
+    # max_workers=2: one slot for the chunk being yielded, one for the next chunk.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(_generate_chunk, c) for c in chunks]
+        # Iterate in submission order — NOT as_completed — to preserve sentence sequence.
+        # chunk N+1 generates in the background while chunk N is being yielded.
+        for future in futures:
+            pcm = future.result()
+            if pcm:
+                yield pcm
 
 
 # ---------------- API ---------------- #

@@ -147,7 +147,7 @@ export default function Studio() {
         {/* Content Views */}
         <main className="p-8 max-w-5xl mx-auto w-full pb-20">
           <AnimatePresence mode="wait">
-            {activeTab === 'playground' && <PlaygroundView key="playground" text={text} setText={setText} setUser={setUser} />}
+            {activeTab === 'playground' && <PlaygroundView key="playground" text={text} setText={setText} user={user} setUser={setUser} />}
             {activeTab === 'billing'    && <BillingView   key="billing"    user={user} />}
             {activeTab === 'settings'  && <SettingsView  key="settings"   user={user} setUser={setUser} />}
           </AnimatePresence>
@@ -158,7 +158,7 @@ export default function Studio() {
 }
 
 // Sub-components
-function PlaygroundView({ text, setText, setUser }: { text: string; setText: (val: string) => void; setUser: React.Dispatch<React.SetStateAction<UserProfile | null>> }) {
+function PlaygroundView({ text, setText, user, setUser }: { text: string; setText: (val: string) => void; user: UserProfile | null; setUser: React.Dispatch<React.SetStateAction<UserProfile | null>> }) {
   const [generating, setGenerating] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);

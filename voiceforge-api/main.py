@@ -35,29 +35,38 @@ app = FastAPI()
 
 # ---------------- CONFIG ---------------- #
 
-DEFAULT_TEMPERATURE = 0.35
-DEFAULT_TOP_P = 0.72
-DEFAULT_REP_PENALTY = 1.2
+# Neutral defaults — balanced for natural, conversational speech
+# Higher temp than before (0.60 vs 0.35) gives natural prosody variation
+DEFAULT_TEMPERATURE = 0.60
+DEFAULT_TOP_P = 0.90
+DEFAULT_REP_PENALTY = 1.1
 
+# Tone presets — each tone has a distinct enough parameter spread so they
+# genuinely *sound* different from each other and from neutral.
+# Key axes:
+#   temperature  → expressiveness / prosody variation (higher = more dramatic)
+#   top_p        → token diversity (higher = more word choices, richer delivery)
+#   rep_penalty  → avoids flat repetition; higher = more varied pronunciation
+#   speed        → pace (no pitch correction — keep within 0.85–1.15 range)
 TONE_PRESETS = {
-    # Peaceful and measured, but not completely flat
-    "calm": {"temperature": 0.32, "top_p": 0.70, "speed": 0.94},
-    # Intimate and soft, slightly slower
-    "romantic": {"temperature": 0.30, "top_p": 0.68, "speed": 0.92},
-    # Dynamic and highly expressive narrator, moderate speed
-    "storytelling": {"temperature": 0.42, "top_p": 0.78, "speed": 0.98},
-    # Tense, calculated, and slow to build suspense
-    "horror": {"temperature": 0.28, "top_p": 0.65, "speed": 0.90},
-    # Sharp, intense, and emphatic (lowered speed to prevent pitch rise)
-    "angry": {"temperature": 0.52, "top_p": 0.80, "speed": 1.05},
-    # Bold, energetic, and punchy
-    "adventurous": {"temperature": 0.45, "top_p": 0.80, "speed": 1.06},
-    # Enthusiastic, bubbly, and fast
-    "excited": {"temperature": 0.48, "top_p": 0.82, "speed": 1.10},
-    # Somber, subdued, and moderately slow (preventing too much pitch drop)
-    "sad": {"temperature": 0.32, "top_p": 0.68, "speed": 0.94},
-    # Lighthearted, bubbly, and slightly fast
-    "funny": {"temperature": 0.46, "top_p": 0.82, "speed": 1.05},
+    # Measured, warm, controlled — a bedtime-story or meditation voice
+    "calm": {"temperature": 0.42, "top_p": 0.82, "repetition_penalty": 1.15, "speed": 0.93},
+    # Intimate, breathy, unhurried — close-mic, almost whispery
+    "romantic": {"temperature": 0.38, "top_p": 0.78, "repetition_penalty": 1.15, "speed": 0.91},
+    # Wide dynamic range — the voice rises and falls like a seasoned narrator
+    "storytelling": {"temperature": 0.68, "top_p": 0.90, "repetition_penalty": 1.10, "speed": 0.97},
+    # Slow, deliberate, calculated — creeping dread, barely above a whisper
+    "horror": {"temperature": 0.35, "top_p": 0.72, "repetition_penalty": 1.25, "speed": 0.86},
+    # Loud, sharp, intense — clipped words, punchy delivery
+    "angry": {"temperature": 0.85, "top_p": 0.95, "repetition_penalty": 1.05, "speed": 1.08},
+    # Confident, upbeat, driving — like a movie trailer narrator
+    "adventurous": {"temperature": 0.72, "top_p": 0.90, "repetition_penalty": 1.08, "speed": 1.07},
+    # Energetic, rapid, almost breathless — maximum enthusiasm
+    "excited": {"temperature": 0.90, "top_p": 0.97, "repetition_penalty": 1.05, "speed": 1.14},
+    # Heavy, slow, flat — grief-weighted delivery
+    "sad": {"temperature": 0.40, "top_p": 0.80, "repetition_penalty": 1.18, "speed": 0.90},
+    # Playful, quick, variable — comedic timing with bouncy rhythm
+    "funny": {"temperature": 0.80, "top_p": 0.93, "repetition_penalty": 1.05, "speed": 1.05},
 }
 
 # ---------------- REQUEST ---------------- #
@@ -142,16 +151,30 @@ def pcm_to_wav(pcm_bytes):
 
 
 def apply_speed(pcm_bytes, speed):
-    if not speed or speed == 1.0:
+    """Resample PCM audio to change playback speed.
+    Uses scipy's polyphase filter (resample_poly) which produces significantly
+    less aliasing than numpy linear interpolation — better quality at the same cost.
+    Neutral tone always gets speed=1.0 so this function is skipped entirely.
+    """
+    if not speed or abs(speed - 1.0) < 0.005:
         return pcm_bytes
 
-    samples = np.frombuffer(pcm_bytes, dtype=np.int16)
-    new_len = int(len(samples) / speed)
+    from scipy.signal import resample_poly
+    from math import gcd
 
-    x_old = np.arange(len(samples))
-    x_new = np.linspace(0, len(samples)-1, new_len)
+    samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32)
 
-    resampled = np.interp(x_new, x_old, samples).astype(np.int16)
+    # Express speed as a rational fraction so resample_poly can use integer up/down factors.
+    # output_length = input_length / speed  →  up/down = 1/speed
+    # e.g. speed=1.08 → up=125, down=135 (after GCD reduction)
+    precision = 1000
+    up = int(round(precision / speed))
+    down = precision
+    g = gcd(up, down)
+    up //= g
+    down //= g
+
+    resampled = resample_poly(samples, up, down).astype(np.int16)
     return resampled.tobytes()
 
 
@@ -210,18 +233,25 @@ def tts(req: TTSRequest):
     tone = TONE_PRESETS.get(req.tone, {})
 
     temperature = req.temperature or tone.get("temperature", DEFAULT_TEMPERATURE)
-    top_p = req.top_p or tone.get("top_p", DEFAULT_TOP_P)
-    rep_pen = req.repetition_penalty or DEFAULT_REP_PENALTY
-    speed = req.speed or tone.get("speed", 1.0)
+    top_p       = req.top_p        or tone.get("top_p",        DEFAULT_TOP_P)
+    rep_pen     = req.repetition_penalty or tone.get("repetition_penalty", DEFAULT_REP_PENALTY)
+    speed       = req.speed        or tone.get("speed",        1.0)
 
-    # ---------------- BILLING CALCULATION ---------------- #
-    # Count emotion tags like <gasp>, <laugh>, etc.
+    # ---------------- EMOTION TAGS ---------------- #
+    # Detect inline emotion tags like <laugh>, <gasp>, <sigh>, etc.
+    # When present and the user hasn't manually set temperature, boost it so the
+    # model has more freedom to generate acoustically distinct emotional sounds.
     emotion_tags = re.findall(r'<\w+>', req.text)
     emotion_tag_count = len(emotion_tags)
 
-    # Billable character count = full text length (tags are part of the input cost)
-    char_count = len(req.text)
+    if emotion_tag_count > 0 and req.temperature is None:
+        # +0.08 boost — enough to differentiate <laugh> vs <gasp> vs <sigh>,
+        # but capped at 0.95 to avoid model instability
+        temperature = min(temperature + 0.08, 0.95)
 
+    # ---------------- BILLING CALCULATION ---------------- #
+    # emotion_tags already computed above — reuse for billing
+    char_count = len(req.text)
     # Credit formula: 1 credit per character + 5 credits per emotion tag surcharge
     credits_deducted = char_count + (emotion_tag_count * 5)
 

@@ -212,8 +212,8 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
   const outputRef = useRef<HTMLDivElement>(null);
 
   const TONE_SPEEDS: Record<string, number> = {
-    calm: 0.94, romantic: 0.92, storytelling: 0.95, horror: 0.93, 
-    angry: 1.12, adventurous: 1.05, excited: 1.09, sad: 0.93
+    calm: 0.93, romantic: 0.91, storytelling: 0.97, horror: 0.86,
+    angry: 1.08, adventurous: 1.07, excited: 1.14, sad: 0.90, funny: 1.05
   };
 
   const EMOTIONS = ['giggle', 'laugh', 'chuckle', 'sigh', 'cough', 'sniffle', 'groan', 'yawn', 'gasp'];
@@ -398,7 +398,34 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
           }
         }
         
-        if (done) break;
+        if (done) {
+          // ── Last-words fix ────────────────────────────────────────────────────
+          // The final read() from a fetch stream typically returns {done:true, value:undefined}.
+          // Any PCM left in leftoverBuffer from the previous iteration (didn't meet
+          // MIN_CHUNK_SIZE) would be silently discarded — causing the last syllables
+          // to play in the downloaded WAV but not in the live stream.
+          // We flush it here before exiting the loop.
+          if (leftoverBuffer.length >= 2) {
+            const flushSamples = Math.floor(leftoverBuffer.length / 2);
+            if (flushSamples > 0) {
+              const int16Flush = new Int16Array(leftoverBuffer.buffer, leftoverBuffer.byteOffset, flushSamples);
+              const f32Flush = new Float32Array(flushSamples);
+              for (let i = 0; i < flushSamples; i++) {
+                f32Flush[i] = int16Flush[i] / 32768.0;
+              }
+              const flushBuf = context.createBuffer(1, flushSamples, SAMPLE_RATE);
+              flushBuf.copyToChannel(f32Flush, 0);
+              const flushSrc = context.createBufferSource();
+              flushSrc.buffer = flushBuf;
+              flushSrc.connect(context.destination);
+              const flushStart = Math.max(context.currentTime, nextPlayTimeRef.current);
+              flushSrc.start(flushStart);
+              nextPlayTimeRef.current = flushStart + flushBuf.duration;
+              setGenerating(false);
+            }
+          }
+          break;
+        }
       }
       
       // Stream finished -> Stitch chunks into a downloadable WAV

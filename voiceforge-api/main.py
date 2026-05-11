@@ -119,7 +119,7 @@ class TTSRequest(BaseModel):
     speed: Optional[float] = None
 
 
-def split_text(text, max_chars=160):
+def split_text(text, max_chars=300):
     """Split text into chunks at natural sentence boundaries.
 
     Why this matters for TTS quality:
@@ -158,6 +158,7 @@ def split_text(text, max_chars=160):
             emotion_merged.append(s)
     raw_sentences = emotion_merged
 
+    chunks = []
     for sentence in raw_sentences:
         sentence = sentence.strip()
         if not sentence:
@@ -281,18 +282,12 @@ def generate_tts_stream(text, voice, temp, top_p, rep_pen, speed):
             return b''
         return apply_speed(pcm, speed)
 
-    # Pre-generate the next chunk in a background thread while the current chunk
-    # is being yielded to the client.  This eliminates the inter-chunk silence gap
-    # that occurs when sequential generation finishes before the next chunk is ready.
-    # max_workers=2: one slot for the chunk being yielded, one for the next chunk.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [pool.submit(_generate_chunk, c) for c in chunks]
-        # Iterate in submission order — NOT as_completed — to preserve sentence sequence.
-        # chunk N+1 generates in the background while chunk N is being yielded.
-        for future in futures:
-            pcm = future.result()
-            if pcm:
-                yield pcm
+    # Sequential generation — LM Studio handles one request at a time, so parallel
+    # submission doesn't reduce latency and risks request interference.
+    for chunk in chunks:
+        pcm = _generate_chunk(chunk)
+        if pcm:
+            yield pcm
 
 
 # ---------------- API ---------------- #

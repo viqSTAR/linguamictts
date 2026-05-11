@@ -55,24 +55,23 @@ DEFAULT_REP_PENALTY = 1.10
 #   speed        → pace (no pitch correction — keep within 0.85–1.15 range)
 TONE_PRESETS = {
     # Measured, warm, controlled — a bedtime-story or meditation voice
-    "calm": {"temperature": 0.42, "top_p": 0.82, "repetition_penalty": 1.20, "speed": 0.93},
+    "calm": {"temperature": 0.42, "top_p": 0.82, "repetition_penalty": 1.10, "speed": 0.93},
     # Intimate, breathy, unhurried — close-mic, almost whispery
-    "romantic": {"temperature": 0.38, "top_p": 0.78, "repetition_penalty": 1.20, "speed": 0.91},
+    "romantic": {"temperature": 0.38, "top_p": 0.78, "repetition_penalty": 1.10, "speed": 0.91},
     # Wide dynamic range — the voice rises and falls like a seasoned narrator
-    "storytelling": {"temperature": 0.68, "top_p": 0.90, "repetition_penalty": 1.15, "speed": 0.97},
+    "storytelling": {"temperature": 0.68, "top_p": 0.90, "repetition_penalty": 1.10, "speed": 0.97},
     # Slow, deliberate, calculated — creeping dread, barely above a whisper
-    "horror": {"temperature": 0.35, "top_p": 0.72, "repetition_penalty": 1.28, "speed": 0.86},
+    "horror": {"temperature": 0.35, "top_p": 0.72, "repetition_penalty": 1.10, "speed": 0.86},
     # Loud, sharp, intense — clipped words, punchy delivery
-    # rep_penalty raised to 1.12 (was 1.05) to stop repeated phrases even in angry tone
-    "angry": {"temperature": 0.85, "top_p": 0.95, "repetition_penalty": 1.12, "speed": 1.08},
+    "angry": {"temperature": 0.85, "top_p": 0.95, "repetition_penalty": 1.10, "speed": 1.08},
     # Confident, upbeat, driving — like a movie trailer narrator
-    "adventurous": {"temperature": 0.72, "top_p": 0.90, "repetition_penalty": 1.12, "speed": 1.07},
+    "adventurous": {"temperature": 0.72, "top_p": 0.90, "repetition_penalty": 1.10, "speed": 1.07},
     # Energetic, rapid, almost breathless — maximum enthusiasm
-    "excited": {"temperature": 0.90, "top_p": 0.97, "repetition_penalty": 1.12, "speed": 1.14},
+    "excited": {"temperature": 0.90, "top_p": 0.97, "repetition_penalty": 1.10, "speed": 1.14},
     # Heavy, slow, flat — grief-weighted delivery
-    "sad": {"temperature": 0.40, "top_p": 0.80, "repetition_penalty": 1.22, "speed": 0.90},
+    "sad": {"temperature": 0.40, "top_p": 0.80, "repetition_penalty": 1.10, "speed": 0.90},
     # Playful, quick, variable — comedic timing with bouncy rhythm
-    "funny": {"temperature": 0.80, "top_p": 0.93, "repetition_penalty": 1.12, "speed": 1.05},
+    "funny": {"temperature": 0.80, "top_p": 0.93, "repetition_penalty": 1.10, "speed": 1.05},
 }
 
 # ---------------- EMOTION TAG CONSTANTS ---------------- #
@@ -286,10 +285,12 @@ def generate_tts_stream(text, voice, temp, top_p, rep_pen, speed):
             eff_max_tokens = 250
             eff_temp = 0.65
             eff_rep = 1.10
+            eff_speed = 1.0 # Force neutral speed so emotions are not affected by tones
         else:
             eff_max_tokens = min(max(1200, len(chunk) * 22), 8000)
             eff_temp = temp
             eff_rep = rep_pen
+            eff_speed = speed
 
         audio = generate_speech_from_api(
             prompt=chunk,
@@ -302,7 +303,7 @@ def generate_tts_stream(text, voice, temp, top_p, rep_pen, speed):
         pcm = audio_to_pcm(audio)
         if not pcm:
             return b''
-        return apply_speed(pcm, speed)
+        return apply_speed(pcm, eff_speed)
 
     # Sequential generation — LM Studio handles one request at a time, so parallel
     # submission doesn't reduce latency and risks request interference.

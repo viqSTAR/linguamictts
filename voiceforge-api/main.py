@@ -32,47 +32,6 @@ _lm_port = os.getenv("LM_STUDIO_PORT", "1234")
 _gguf_orpheus_module.API_URL = f"http://{_lm_host}:{_lm_port}/v1/completions"
 print(f"[LM Studio] API_URL set to: {_gguf_orpheus_module.API_URL}")
 
-# ── Monkey-patch: flush tail tokens in tokens_decoder ──────────────────────
-# Official Orpheus bug (README todo): "Fix glitch in realtime streaming package
-# that occasionally skips frames."
-#
-# Root cause: tokens_decoder yields audio every 7 tokens (one SNAC frame group).
-# When generation ends, 1–6 tokens remain in the buffer and are NEVER processed.
-# Those dropped tokens = the last ~10-80ms of each chunk → word endings clipped,
-# emotion sounds disappear, last syllable cut mid-pronunciation.
-#
-# Fix: after the token loop, pad the remaining tokens to the nearest complete
-# group of 7 and yield one final audio frame.
-async def _patched_tokens_decoder(token_gen):
-    buffer: list[int] = []
-    count = 0
-    async for token_text in token_gen:
-        token = _gguf_orpheus_module.turn_token_into_id(token_text, count)
-        if token is not None and token > 0:
-            buffer.append(token)
-            count += 1
-            if count % 7 == 0 and count > 27:
-                buffer_to_proc = buffer[-28:]
-                audio_samples = _gguf_orpheus_module.convert_to_audio(buffer_to_proc, count)
-                if audio_samples is not None:
-                    yield audio_samples
-
-    # ── TAIL FLUSH: process remaining 1–6 tokens ──────────────────────────
-    # Without this, they are silently dropped every single generation.
-    remaining = count % 7
-    if remaining > 0 and count >= 28:
-        pad_needed = 7 - remaining
-        # Repeat the last valid token to complete the frame — produces a
-        # very brief near-silence tail that prevents the hard cut-off
-        padded = buffer + [buffer[-1]] * pad_needed
-        buffer_to_proc = padded[-28:]
-        audio_samples = _gguf_orpheus_module.convert_to_audio(buffer_to_proc, count)
-        if audio_samples is not None:
-            yield audio_samples
-
-_gguf_orpheus_module.tokens_decoder = _patched_tokens_decoder
-print("[Orpheus] Patched tokens_decoder: tail-flush enabled (fixes frame-skip bug)")
-# ───────────────────────────────────────────────────────────────────────────
 
 app = FastAPI()
 
@@ -184,22 +143,7 @@ def split_text(text, max_chars=300):
     # Step 1: split at real sentence boundaries (. ? ! followed by space or end-of-string)
     raw_sentences = re.split(r'(?<=[.?!])\s+', text)
 
-    # Step 1b: emotion-context merge.
-    # Orpheus needs SPOKEN TEXT before an emotion tag to generate it correctly.
-    # A <laugh> or <cough> at the very start of a chunk (nothing spoken before it)
-    # causes the model to misfire — it produces a gasp-like sound instead.
-    # Fix: if a sentence starts with an emotion tag, attach it to the end of the
-    # previous sentence so the tag has preceding speech context.
-    emotion_merged: list[str] = []
-    for s in raw_sentences:
-        s = s.strip()
-        if not s:
-            continue
-        if emotion_merged and _EMOTION_TAG_RE.match(s):
-            emotion_merged[-1] = emotion_merged[-1] + ' ' + s
-        else:
-            emotion_merged.append(s)
-    raw_sentences = emotion_merged
+
 
     chunks = []
     for sentence in raw_sentences:

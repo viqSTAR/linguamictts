@@ -184,18 +184,18 @@ const proxyTTS = async (req, res) => {
 
     const updatedBalance = deduction.creditsRemaining;
 
-    // Forward headers but update X-Credits-Remaining
+    // Forward headers but set x-credits-remaining authoritatively from our deduction result
     for (const [key, value] of Object.entries(response.headers)) {
-      if (key.toLowerCase() === 'x-credits-remaining') {
-        res.setHeader(key, updatedBalance.toString());
-      } else {
+      if (key.toLowerCase() !== 'x-credits-remaining') {
         res.setHeader(key, value);
       }
     }
+    res.setHeader('x-credits-remaining', updatedBalance.toString());
     
     // Add chunked headers for live streaming
     res.setHeader('Transfer-Encoding', 'chunked');
     res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Access-Control-Expose-Headers', 'x-credits-remaining, x-credits-deducted, x-char-count, x-emotion-tag-count, x-tone');
     
     // Pipe audio data to client
     response.data.pipe(res);
@@ -322,14 +322,17 @@ const proxyStudioTTS = async (req, res) => {
     }
 
     for (const [key, value] of Object.entries(response.headers)) {
-      if (key.toLowerCase() === 'x-credits-remaining') {
-        res.setHeader(key, deduction.creditsRemaining.toString());
-      } else {
+      // Skip x-credits-remaining from upstream — we set the authoritative value below
+      if (key.toLowerCase() !== 'x-credits-remaining') {
         res.setHeader(key, value);
       }
     }
+    // Always set the authoritative balance after deduction
+    res.setHeader('x-credits-remaining', deduction.creditsRemaining.toString());
     res.setHeader('Transfer-Encoding', 'chunked');
     res.setHeader('Cache-Control', 'no-cache');
+    // Expose billing headers to the browser (required for fetch to read them cross-origin)
+    res.setHeader('Access-Control-Expose-Headers', 'x-credits-remaining, x-credits-deducted, x-char-count, x-emotion-tag-count, x-tone');
     const audioChunks = [];
     response.data.on('data', (chunk) => {
       audioChunks.push(chunk);

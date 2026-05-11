@@ -214,6 +214,17 @@ def tts(req: TTSRequest):
     rep_pen = req.repetition_penalty or DEFAULT_REP_PENALTY
     speed = req.speed or tone.get("speed", 1.0)
 
+    # ---------------- BILLING CALCULATION ---------------- #
+    # Count emotion tags like <gasp>, <laugh>, etc.
+    emotion_tags = re.findall(r'<\w+>', req.text)
+    emotion_tag_count = len(emotion_tags)
+
+    # Billable character count = full text length (tags are part of the input cost)
+    char_count = len(req.text)
+
+    # Credit formula: 1 credit per character + 5 credits per emotion tag surcharge
+    credits_deducted = char_count + (emotion_tag_count * 5)
+
     return StreamingResponse(
         generate_tts_stream(
             text=req.text,
@@ -227,7 +238,12 @@ def tts(req: TTSRequest):
         headers={
             "Content-Disposition": f"attachment; filename=voice_{datetime.utcnow().timestamp()}.wav",
             "Transfer-Encoding": "chunked",
-            "Cache-Control": "no-cache"
+            "Cache-Control": "no-cache",
+            # Billing headers — read by Express proxy to deduct user credits
+            "x-credits-deducted": str(credits_deducted),
+            "x-char-count": str(char_count),
+            "x-emotion-tag-count": str(emotion_tag_count),
+            "x-tone": req.tone or "",
         }
     )
 

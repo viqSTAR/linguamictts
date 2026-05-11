@@ -171,19 +171,34 @@ def split_text(text, max_chars=300):
             if current.strip():
                 chunks.append(current.strip())
 
-    # Step 3: merge chunks that are too short for Orpheus to generate meaningful audio.
-    # The model needs at least 28 token frames to produce any output — very short fragments
-    # (e.g. a lone emotion tag, a one-word sentence) produce silence instead.
-    MIN_CHUNK_CHARS = 30
-    merged: list[str] = []
+    # Step 3: isolate each emotion tag as its own dedicated chunk.
+    # The user wants '<laugh>' to produce ONE consistent laugh sound every time.
+    # If the emotion is buried in a 150-char sentence, the model's state at that
+    # point in generation affects how it sounds — unpredictable and inconsistent.
+    # Solution: re.split with a capturing group keeps the tags as list elements,
+    # giving each emotion its own dedicated generation call with fixed settings.
+    isolated: list[str] = []
     for chunk in chunks:
-        if merged and len(chunk) < MIN_CHUNK_CHARS:
-            # Attach to previous chunk — they belong to the same breath group anyway
+        parts = re.split(r'(<\w+>)', chunk)   # capturing group keeps the tag
+        for part in parts:
+            part = part.strip()
+            if part:
+                isolated.append(part)
+
+    # Step 4: merge very short NON-emotion fragments (< 30 chars) with neighbours.
+    # Emotion chunks are NEVER merged — they must stay isolated.
+    MIN_CHARS = 30
+    merged: list[str] = []
+    for chunk in isolated:
+        is_emotion = bool(re.fullmatch(r'<\w+>', chunk))
+        prev_is_emotion = bool(merged and re.fullmatch(r'<\w+>', merged[-1]))
+        if not is_emotion and not prev_is_emotion and merged and len(chunk) < MIN_CHARS:
             merged[-1] = merged[-1] + ' ' + chunk
         else:
             merged.append(chunk)
 
     return [c for c in merged if c.strip()]
+
 
 
 def audio_to_pcm(audio):
@@ -256,15 +271,33 @@ def generate_tts_stream(text, voice, temp, top_p, rep_pen, speed):
     yield create_wav_header()
 
     def _generate_chunk(chunk: str) -> bytes:
-        """Generate and speed-adjust PCM for a single text chunk."""
-        max_tokens = min(max(1200, len(chunk) * 22), 8000)
+        """Generate and speed-adjust PCM for a single text chunk.
+
+        Emotion-only chunks (e.g. '<laugh>') get dedicated fixed settings so the
+        same emotion tag always produces the same sound, regardless of the active
+        tone or surrounding text.
+        """
+        is_emotion_only = bool(re.fullmatch(r'<\w+>', chunk.strip()))
+
+        if is_emotion_only:
+            # Fixed settings for deterministic, consistent emotion sounds.
+            # max_tokens 250 = enough for ~0.9s of audio (a short laugh/cough/gasp).
+            # temp 0.65 = slightly expressive so the sound feels natural, not robotic.
+            eff_max_tokens = 250
+            eff_temp = 0.65
+            eff_rep = 1.10
+        else:
+            eff_max_tokens = min(max(1200, len(chunk) * 22), 8000)
+            eff_temp = temp
+            eff_rep = rep_pen
+
         audio = generate_speech_from_api(
             prompt=chunk,
             voice=voice,
-            temperature=temp,
+            temperature=eff_temp,
             top_p=top_p,
-            repetition_penalty=rep_pen,
-            max_tokens=max_tokens,
+            repetition_penalty=eff_rep,
+            max_tokens=eff_max_tokens,
         )
         pcm = audio_to_pcm(audio)
         if not pcm:

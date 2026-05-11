@@ -31,6 +31,49 @@ _lm_host = os.getenv("LM_STUDIO_HOST", "127.0.0.1")
 _lm_port = os.getenv("LM_STUDIO_PORT", "1234")
 _gguf_orpheus_module.API_URL = f"http://{_lm_host}:{_lm_port}/v1/completions"
 print(f"[LM Studio] API_URL set to: {_gguf_orpheus_module.API_URL}")
+
+# ── Monkey-patch: flush tail tokens in tokens_decoder ──────────────────────
+# Official Orpheus bug (README todo): "Fix glitch in realtime streaming package
+# that occasionally skips frames."
+#
+# Root cause: tokens_decoder yields audio every 7 tokens (one SNAC frame group).
+# When generation ends, 1–6 tokens remain in the buffer and are NEVER processed.
+# Those dropped tokens = the last ~10-80ms of each chunk → word endings clipped,
+# emotion sounds disappear, last syllable cut mid-pronunciation.
+#
+# Fix: after the token loop, pad the remaining tokens to the nearest complete
+# group of 7 and yield one final audio frame.
+async def _patched_tokens_decoder(token_gen):
+    buffer: list[int] = []
+    count = 0
+    async for token_text in token_gen:
+        token = _gguf_orpheus_module.turn_token_into_id(token_text, count)
+        if token is not None and token > 0:
+            buffer.append(token)
+            count += 1
+            if count % 7 == 0 and count > 27:
+                buffer_to_proc = buffer[-28:]
+                audio_samples = _gguf_orpheus_module.convert_to_audio(buffer_to_proc, count)
+                if audio_samples is not None:
+                    yield audio_samples
+
+    # ── TAIL FLUSH: process remaining 1–6 tokens ──────────────────────────
+    # Without this, they are silently dropped every single generation.
+    remaining = count % 7
+    if remaining > 0 and count >= 28:
+        pad_needed = 7 - remaining
+        # Repeat the last valid token to complete the frame — produces a
+        # very brief near-silence tail that prevents the hard cut-off
+        padded = buffer + [buffer[-1]] * pad_needed
+        buffer_to_proc = padded[-28:]
+        audio_samples = _gguf_orpheus_module.convert_to_audio(buffer_to_proc, count)
+        if audio_samples is not None:
+            yield audio_samples
+
+_gguf_orpheus_module.tokens_decoder = _patched_tokens_decoder
+print("[Orpheus] Patched tokens_decoder: tail-flush enabled (fixes frame-skip bug)")
+# ───────────────────────────────────────────────────────────────────────────
+
 app = FastAPI()
 
 # ---------------- CONFIG ---------------- #

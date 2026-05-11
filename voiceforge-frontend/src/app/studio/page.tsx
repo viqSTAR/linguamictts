@@ -206,7 +206,7 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
   const [tone, setTone] = useState('');
   const [speed, setSpeed] = useState(1.0);
   const [showTuning, setShowTuning] = useState(false);
-  const [temperature, setTemperature] = useState(0.35);
+  const [temperature, setTemperature] = useState(0.60);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const outputRef = useRef<HTMLDivElement>(null);

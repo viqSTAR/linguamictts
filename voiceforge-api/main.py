@@ -39,7 +39,8 @@ app = FastAPI()
 # Higher temp than before (0.60 vs 0.35) gives natural prosody variation
 DEFAULT_TEMPERATURE = 0.60
 DEFAULT_TOP_P = 0.90
-DEFAULT_REP_PENALTY = 1.1
+# 1.18 keeps neutral from looping/repeating phrases (was 1.1, too permissive)
+DEFAULT_REP_PENALTY = 1.18
 
 # Tone presets — each tone has a distinct enough parameter spread so they
 # genuinely *sound* different from each other and from neutral.
@@ -50,26 +51,63 @@ DEFAULT_REP_PENALTY = 1.1
 #   speed        → pace (no pitch correction — keep within 0.85–1.15 range)
 TONE_PRESETS = {
     # Measured, warm, controlled — a bedtime-story or meditation voice
-    "calm": {"temperature": 0.42, "top_p": 0.82, "repetition_penalty": 1.15, "speed": 0.93},
+    "calm": {"temperature": 0.42, "top_p": 0.82, "repetition_penalty": 1.20, "speed": 0.93},
     # Intimate, breathy, unhurried — close-mic, almost whispery
-    "romantic": {"temperature": 0.38, "top_p": 0.78, "repetition_penalty": 1.15, "speed": 0.91},
+    "romantic": {"temperature": 0.38, "top_p": 0.78, "repetition_penalty": 1.20, "speed": 0.91},
     # Wide dynamic range — the voice rises and falls like a seasoned narrator
-    "storytelling": {"temperature": 0.68, "top_p": 0.90, "repetition_penalty": 1.10, "speed": 0.97},
+    "storytelling": {"temperature": 0.68, "top_p": 0.90, "repetition_penalty": 1.15, "speed": 0.97},
     # Slow, deliberate, calculated — creeping dread, barely above a whisper
-    "horror": {"temperature": 0.35, "top_p": 0.72, "repetition_penalty": 1.25, "speed": 0.86},
+    "horror": {"temperature": 0.35, "top_p": 0.72, "repetition_penalty": 1.28, "speed": 0.86},
     # Loud, sharp, intense — clipped words, punchy delivery
-    "angry": {"temperature": 0.85, "top_p": 0.95, "repetition_penalty": 1.05, "speed": 1.08},
+    # rep_penalty raised to 1.12 (was 1.05) to stop repeated phrases even in angry tone
+    "angry": {"temperature": 0.85, "top_p": 0.95, "repetition_penalty": 1.12, "speed": 1.08},
     # Confident, upbeat, driving — like a movie trailer narrator
-    "adventurous": {"temperature": 0.72, "top_p": 0.90, "repetition_penalty": 1.08, "speed": 1.07},
+    "adventurous": {"temperature": 0.72, "top_p": 0.90, "repetition_penalty": 1.12, "speed": 1.07},
     # Energetic, rapid, almost breathless — maximum enthusiasm
-    "excited": {"temperature": 0.90, "top_p": 0.97, "repetition_penalty": 1.05, "speed": 1.14},
+    "excited": {"temperature": 0.90, "top_p": 0.97, "repetition_penalty": 1.12, "speed": 1.14},
     # Heavy, slow, flat — grief-weighted delivery
-    "sad": {"temperature": 0.40, "top_p": 0.80, "repetition_penalty": 1.18, "speed": 0.90},
+    "sad": {"temperature": 0.40, "top_p": 0.80, "repetition_penalty": 1.22, "speed": 0.90},
     # Playful, quick, variable — comedic timing with bouncy rhythm
-    "funny": {"temperature": 0.80, "top_p": 0.93, "repetition_penalty": 1.05, "speed": 1.05},
+    "funny": {"temperature": 0.80, "top_p": 0.93, "repetition_penalty": 1.12, "speed": 1.05},
 }
 
-# ---------------- REQUEST ---------------- #
+# ---------------- EMOTION TAG CONSTANTS ---------------- #
+
+# These are the ONLY 8 emotion tags the Orpheus model was trained on.
+# Source: gguf_orpheus.py list_available_voices() and Canopy Labs model card.
+# Any other tag (e.g. <giggle>, <whisper>) is NOT in the model vocab and will
+# produce undefined acoustic output — usually whatever the model guesses nearest.
+VALID_ORPHEUS_EMOTIONS = frozenset([
+    "laugh", "chuckle", "sigh", "cough", "sniffle", "groan", "yawn", "gasp"
+])
+
+# Pre-compiled regex matching any <word> tag in text
+_EMOTION_TAG_RE = re.compile(r'<(\w+)>')
+
+
+def sanitize_emotion_tags(text: str) -> str:
+    """Strip any emotion-style tags that are NOT in the official Orpheus vocab.
+
+    Valid tags are left as-is.  Unknown tags are removed rather than kept,
+    because the model will misinterpret them and usually produce a gasp or
+    clipped noise — exactly the bug the user reported with <giggle>.
+
+    Examples:
+        'I am the Goat <laugh>'      → 'I am the Goat <laugh>'  (unchanged)
+        'Hello <giggle> world'       → 'Hello  world'            (stripped)
+        '<whisper>Secret</whisper>'  → 'Secret'                  (stripped)
+    """
+    def _keep_or_strip(m: re.Match) -> str:
+        tag_name = m.group(1).lower()
+        return m.group(0) if tag_name in VALID_ORPHEUS_EMOTIONS else ''
+
+    cleaned = _EMOTION_TAG_RE.sub(_keep_or_strip, text)
+    # Collapse any double-spaces left by stripped tags
+    return re.sub(r'  +', ' ', cleaned).strip()
+
+
+# ---------------- UTIL ---------------- #
+
 
 class TTSRequest(BaseModel):
     text: str
@@ -89,6 +127,9 @@ def split_text(text, max_chars=100):
     text = re.sub(r'\s+', ' ', text).strip()
     words = text.split(' ')
     
+    # Pattern matching a valid Orpheus emotion tag at the very end of a string
+    EMOTION_TAG_END = re.compile(r'<\w+>$')
+
     chunks = []
     current_chunk = []
     current_len = 0
@@ -102,9 +143,11 @@ def split_text(text, max_chars=100):
         # If adding this word exceeds max_chars
         if current_len + word_len > max_chars and current_chunk:
             chunk_str = " ".join(current_chunk)
-            # Force a trailing comma if no punctuation exists, to pad the audio 
-            # and prevent the Orpheus decoder from chopping the last syllable
-            if not re.search(r'[.?!,\n]$', chunk_str):
+            # Add trailing comma to pad audio and prevent Orpheus clipping the last syllable.
+            # BUT: never add punctuation right after an emotion tag — Orpheus sees the period
+            # as a new token immediately after the emotion token and misinterprets the sound
+            # (e.g. <laugh>. can come out as a gasp or clipped noise).
+            if not re.search(r'[.?!,\n]$', chunk_str) and not EMOTION_TAG_END.search(chunk_str):
                 chunk_str += ","
             chunks.append(chunk_str)
             
@@ -123,8 +166,9 @@ def split_text(text, max_chars=100):
                 
     if current_chunk:
         chunk_str = " ".join(current_chunk)
-        if not re.search(r'[.?!,\n]$', chunk_str):
-            chunk_str += "." 
+        # Same rule: don't add period after an emotion tag
+        if not re.search(r'[.?!,\n]$', chunk_str) and not EMOTION_TAG_END.search(chunk_str):
+            chunk_str += "."
         chunks.append(chunk_str)
         
     return chunks
@@ -230,6 +274,15 @@ def tts(req: TTSRequest):
     if req.voice not in AVAILABLE_VOICES:
         raise HTTPException(400, "Invalid voice")
 
+    # Sanitize: strip any tag that isn't in the Orpheus vocab BEFORE anything else.
+    # Unknown tags (e.g. <giggle>, <whisper>) cause the model to produce a gasp-like
+    # noise or silence. We remove them silently here so the rest of the text still
+    # generates correctly.
+    clean_text = sanitize_emotion_tags(req.text)
+
+    if not clean_text.strip():
+        raise HTTPException(400, "Text is empty after removing invalid emotion tags")
+
     tone = TONE_PRESETS.get(req.tone, {})
 
     temperature = req.temperature or tone.get("temperature", DEFAULT_TEMPERATURE)
@@ -238,26 +291,27 @@ def tts(req: TTSRequest):
     speed       = req.speed        or tone.get("speed",        1.0)
 
     # ---------------- EMOTION TAGS ---------------- #
-    # Detect inline emotion tags like <laugh>, <gasp>, <sigh>, etc.
-    # When present and the user hasn't manually set temperature, boost it so the
-    # model has more freedom to generate acoustically distinct emotional sounds.
-    emotion_tags = re.findall(r'<\w+>', req.text)
-    emotion_tag_count = len(emotion_tags)
+    # Count only VALID emotion tags in the sanitized text.
+    # Using _EMOTION_TAG_RE + VALID_ORPHEUS_EMOTIONS to be consistent.
+    valid_emotion_matches = [
+        m for m in _EMOTION_TAG_RE.finditer(clean_text)
+        if m.group(1).lower() in VALID_ORPHEUS_EMOTIONS
+    ]
+    emotion_tag_count = len(valid_emotion_matches)
 
     if emotion_tag_count > 0 and req.temperature is None:
-        # +0.08 boost — enough to differentiate <laugh> vs <gasp> vs <sigh>,
-        # but capped at 0.95 to avoid model instability
-        temperature = min(temperature + 0.08, 0.95)
+        # +0.05 boost — gives the model more expressive freedom for emotions
+        # without causing instability (was 0.08, lowered for consistency)
+        temperature = min(temperature + 0.05, 0.92)
 
     # ---------------- BILLING CALCULATION ---------------- #
-    # emotion_tags already computed above — reuse for billing
-    char_count = len(req.text)
-    # Credit formula: 1 credit per character + 5 credits per emotion tag surcharge
+    char_count = len(req.text)   # bill on original text length (user typed it)
+    # Credit formula: 1 credit per character + 5 credits per valid emotion tag
     credits_deducted = char_count + (emotion_tag_count * 5)
 
     return StreamingResponse(
         generate_tts_stream(
-            text=req.text,
+            text=clean_text,    # ← sanitized text goes to model
             voice=req.voice,
             temp=temperature,
             top_p=top_p,

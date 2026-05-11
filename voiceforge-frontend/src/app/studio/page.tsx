@@ -216,7 +216,11 @@ function PlaygroundView({ text, setText, setUser }: { text: string; setText: (va
     angry: 1.08, adventurous: 1.07, excited: 1.14, sad: 0.90, funny: 1.05
   };
 
-  const EMOTIONS = ['giggle', 'laugh', 'chuckle', 'sigh', 'cough', 'sniffle', 'groan', 'yawn', 'gasp'];
+  // Valid Orpheus emotion tokens (confirmed from model training data).
+  // 'giggle' is NOT in the Orpheus vocab — the model falls back to the closest
+  // acoustic match (usually a gasp). Removed to prevent laugh→gasp confusion.
+  const EMOTIONS = ['laugh', 'chuckle', 'sigh', 'cough', 'sniffle', 'groan', 'yawn', 'gasp'];
+
 
   const VOICE_META: Record<string, { emoji: string; gender: 'female' | 'male'; desc: string }> = {
     tara:  { emoji: '👩‍🎤', gender: 'female', desc: 'Warm & expressive' },

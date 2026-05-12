@@ -9,6 +9,12 @@ const getMonthKey = (date) => {
   return `${year}-${month}`;
 };
 
+// First moment of the next calendar month in UTC. Used as the next
+// `currentPeriodEnd` when a subscription renews or is created.
+const endOfCurrentMonthUtc = (now = new Date()) => {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0, 0));
+};
+
 // Mirror of voiceforge-api/main.py — keep in sync
 const VALID_ORPHEUS_EMOTIONS = new Set([
   'laugh', 'chuckle', 'sigh', 'cough', 'sniffle', 'groan', 'yawn', 'gasp',
@@ -123,6 +129,9 @@ const ensureMonthlyCredits = async (userId) => {
           addonCredits: true,
           plan: true,
           createdAt: true,
+          subscriptionStatus: true,
+          currentPeriodEnd: true,
+          autoRenew: true,
         },
       });
       if (!user) return null;
@@ -135,9 +144,39 @@ const ensureMonthlyCredits = async (userId) => {
 
       const addonCredits = user.addonCredits ?? 0;
 
+      // ── Subscription lifecycle on month rollover ──────────────────────────
+      // If the user is on a paid plan and the period has ended:
+      //   • autoRenew=true   → renew the subscription (extend currentPeriodEnd)
+      //   • autoRenew=false  → downgrade to FREE (plan credits reset to free tier)
+      // FREE users skip this branch entirely.
+      const periodOver = user.currentPeriodEnd && user.currentPeriodEnd <= now;
+      const isPaidPlan = user.plan && user.plan !== 'FREE';
+
+      let effectivePlan = user.plan;
+      let effectivePlanAllocation = user.planMonthlyCredits || DEFAULT_MONTHLY_CREDITS;
+      const subscriptionUpdate = {};
+
+      if (isPaidPlan && periodOver) {
+        if (user.autoRenew && user.subscriptionStatus === 'ACTIVE') {
+          // Auto-renew: keep plan, push period end by one calendar month.
+          // In dummy/mock mode this is free; once Dodo lands, this is where
+          // the renewal charge would happen (and on failure we'd downgrade).
+          subscriptionUpdate.currentPeriodEnd = endOfCurrentMonthUtc(now);
+        } else {
+          // Subscription was cancelled or auto-pay was off — downgrade now.
+          effectivePlan = 'FREE';
+          effectivePlanAllocation = DEFAULT_MONTHLY_CREDITS;
+          subscriptionUpdate.plan = 'FREE';
+          subscriptionUpdate.planMonthlyCredits = DEFAULT_MONTHLY_CREDITS;
+          subscriptionUpdate.subscriptionStatus = 'NONE';
+          subscriptionUpdate.autoRenew = false;
+          subscriptionUpdate.currentPeriodEnd = null;
+        }
+      }
+
       // Plan credit allocation for this month
-      let planAllocation = user.planMonthlyCredits || DEFAULT_MONTHLY_CREDITS;
-      if (user.plan === 'FREE' && isFirstMonth) {
+      let planAllocation = effectivePlanAllocation;
+      if (effectivePlan === 'FREE' && isFirstMonth) {
         planAllocation = FIRST_MONTH_CREDITS;
       }
 
@@ -147,10 +186,14 @@ const ensureMonthlyCredits = async (userId) => {
 
       let updatedBalance = user.creditsBalance;
 
+      const userUpdateData = { ...subscriptionUpdate };
       if (delta !== 0) {
+        userUpdateData.creditsBalance = targetBalance;
+      }
+      if (Object.keys(userUpdateData).length > 0) {
         const updatedUser = await tx.user.update({
           where: { id: userId },
-          data: { creditsBalance: targetBalance },
+          data: userUpdateData,
         });
         updatedBalance = updatedUser.creditsBalance;
       }
@@ -165,7 +208,7 @@ const ensureMonthlyCredits = async (userId) => {
             userId,
             amount: delta,
             type: 'MONTHLY_RESET',
-            description: `Monthly plan reset ${monthKey} — ${planAllocation.toLocaleString()} plan credits + ${addonCredits.toLocaleString()} permanent add-ons`,
+            description: `Monthly plan reset ${monthKey} — ${planAllocation.toLocaleString()} plan credits + ${addonCredits.toLocaleString()} permanent add-ons${subscriptionUpdate.plan === 'FREE' ? ' (subscription cancelled, downgraded to FREE)' : ''}`,
             referenceId: monthKey,
           },
         });
@@ -187,6 +230,7 @@ module.exports = {
   FIRST_MONTH_CREDITS,
   DEFAULT_MONTHLY_CREDITS,
   getMonthKey,
+  endOfCurrentMonthUtc,
   ensureMonthlyCredits,
   VALID_ORPHEUS_EMOTIONS,
   computeTtsCredits,

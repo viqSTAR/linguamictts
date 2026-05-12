@@ -28,6 +28,10 @@ type UserProfile = {
   lastAudioUrl?: string | null;
   lastAudioMp3Url?: string | null;
   presets?: { name: string; voice: string; tone: string; speed: number; temperature: number }[];
+  subscriptionStatus?: 'NONE' | 'ACTIVE' | 'CANCELED';
+  currentPeriodEnd?: string | null;
+  autoRenew?: boolean;
+  canceledAt?: string | null;
 };
 
 type CreditTransaction = {
@@ -148,7 +152,7 @@ export default function Studio() {
         <main className="p-8 max-w-5xl mx-auto w-full pb-20">
           <AnimatePresence mode="wait">
             {activeTab === 'playground' && <PlaygroundView key="playground" text={text} setText={setText} user={user} setUser={setUser} />}
-            {activeTab === 'billing'    && <BillingView   key="billing"    user={user} />}
+            {activeTab === 'billing'    && <BillingView   key="billing"    user={user} setUser={setUser} />}
             {activeTab === 'settings'  && <SettingsView  key="settings"   user={user} setUser={setUser} />}
           </AnimatePresence>
         </main>
@@ -1488,7 +1492,7 @@ const PLAN_THEMES: Record<string, {
   },
 };
 
-function BillingView({ user }: { user: UserProfile | null }) {
+function BillingView({ user, setUser }: { user: UserProfile | null; setUser: React.Dispatch<React.SetStateAction<UserProfile | null>> }) {
   const planKey            = (user?.plan || 'FREE').toString().toLowerCase();
   const theme              = PLAN_THEMES[planKey] || PLAN_THEMES.free;
   const monthlyAllocation  = user?.planMonthlyCredits || 10000;
@@ -1498,10 +1502,76 @@ function BillingView({ user }: { user: UserProfile | null }) {
   const hasTopUpSurplus    = balance > monthlyAllocation;
   const isPro              = theme.isPro === true;
 
+  // Subscription state — FREE plans can't manage anything. Auto-pay toggle and
+  // cancel/resume buttons are gated on this.
+  const isFreePlan         = (user?.plan || 'FREE') === 'FREE';
+  const subStatus          = user?.subscriptionStatus || 'NONE';
+  const autoRenew          = user?.autoRenew === true;
+  const isCanceled         = subStatus === 'CANCELED' || (!isFreePlan && !autoRenew);
+  const periodEnd          = user?.currentPeriodEnd ? new Date(user.currentPeriodEnd) : null;
+  const periodEndLabel     = periodEnd ? periodEnd.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : null;
+
   const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
   const [txLoading, setTxLoading] = useState(true);
-  const [autoPayEnabled, setAutoPayEnabled] = useState(true);
+  const [subBusy, setSubBusy] = useState(false);
+  const [subError, setSubError] = useState<string | null>(null);
   const [refundModal, setRefundModal] = useState<RefundModalState>({ open: false, step: 'confirm' });
+
+  const refreshUser = async () => {
+    try {
+      const res = await api.get('/auth/me');
+      setUser(res.data.user);
+    } catch {
+      /* ignore — next page navigation will re-fetch */
+    }
+  };
+
+  const toggleAutoPay = async (next: boolean) => {
+    if (isFreePlan) return;
+    setSubBusy(true);
+    setSubError(null);
+    try {
+      await api.post('/billing/subscription/autopay', { enabled: next });
+      await refreshUser();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to update auto-pay';
+      setSubError(msg);
+    } finally {
+      setSubBusy(false);
+    }
+  };
+
+  const confirmCancel = async () => {
+    if (isFreePlan) return;
+    setSubBusy(true);
+    setSubError(null);
+    try {
+      await api.post('/billing/subscription/cancel');
+      await refreshUser();
+      setRefundModal({ open: true, step: 'submitted' });
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to cancel subscription';
+      setSubError(msg);
+      setRefundModal({ open: false, step: 'confirm' });
+    } finally {
+      setSubBusy(false);
+    }
+  };
+
+  const resumeSubscription = async () => {
+    if (isFreePlan) return;
+    setSubBusy(true);
+    setSubError(null);
+    try {
+      await api.post('/billing/subscription/resume');
+      await refreshUser();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to resume subscription';
+      setSubError(msg);
+    } finally {
+      setSubBusy(false);
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -1667,37 +1737,85 @@ function BillingView({ user }: { user: UserProfile | null }) {
         initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
         className={`mt-6 rounded-2xl border p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ${theme.usageCardBg} ${theme.usageCardBorder}`}
       >
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
-          <div>
-            <div className={`text-[11px] font-bold uppercase tracking-widest ${theme.usageAccent}`}>Auto-Pay</div>
-            <p className={`text-sm ${theme.usageSub}`}>Toggle auto-renewal for your subscription.</p>
+        {isFreePlan ? (
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6 p-4 rounded-2xl border border-dashed border-neutral-200 bg-neutral-50">
+            <div>
+              <div className={`text-[11px] font-bold uppercase tracking-widest ${theme.usageAccent}`}>Subscription</div>
+              <p className={`text-sm ${theme.usageSub}`}>You&apos;re on the FREE plan. Upgrade to enable auto-pay and subscription management.</p>
+            </div>
+            <Link
+              href="/pricing"
+              className="h-11 px-4 rounded-full font-semibold text-sm bg-black text-white hover:bg-neutral-800 transition-all inline-flex items-center"
+            >
+              View plans
+            </Link>
           </div>
-          <button
-            type="button"
-            onClick={() => setAutoPayEnabled((prev) => !prev)}
-            className={`h-11 px-4 rounded-full font-semibold text-sm border transition-all ${
-              autoPayEnabled
-                ? 'bg-orange-500 text-white border-orange-500 hover:bg-orange-600'
-                : 'bg-neutral-100 text-neutral-500 border-neutral-200 hover:bg-neutral-200'
-            }`}
-          >
-            {autoPayEnabled ? 'Auto-Pay On' : 'Auto-Pay Off'}
-          </button>
-        </div>
+        ) : (
+          <>
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+              <div>
+                <div className={`text-[11px] font-bold uppercase tracking-widest ${theme.usageAccent}`}>Auto-Pay</div>
+                <p className={`text-sm ${theme.usageSub}`}>
+                  {autoRenew
+                    ? (periodEndLabel ? `Renews on ${periodEndLabel}.` : 'Auto-renews monthly.')
+                    : (periodEndLabel ? `Auto-pay off — plan ends ${periodEndLabel}.` : 'Auto-pay is off.')}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={subBusy}
+                onClick={() => toggleAutoPay(!autoRenew)}
+                className={`h-11 px-4 rounded-full font-semibold text-sm border transition-all disabled:opacity-50 disabled:cursor-wait ${
+                  autoRenew
+                    ? 'bg-orange-500 text-white border-orange-500 hover:bg-orange-600'
+                    : 'bg-neutral-100 text-neutral-500 border-neutral-200 hover:bg-neutral-200'
+                }`}
+              >
+                {autoRenew ? 'Auto-Pay On' : 'Auto-Pay Off'}
+              </button>
+            </div>
 
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
-          <div>
-            <div className={`text-[11px] font-bold uppercase tracking-widest ${theme.usageAccent}`}>Cancel Subscription</div>
-            <p className={`text-sm ${theme.usageSub}`}>Cancel your subscription renewal at the end of the billing cycle.</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setRefundModal({ open: true, step: 'confirm' })}
-            className="h-11 px-4 rounded-full font-semibold text-sm border border-red-200 text-red-600 hover:bg-red-50 transition-all"
-          >
-            Cancel Subscription
-          </button>
-        </div>
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+              <div>
+                <div className={`text-[11px] font-bold uppercase tracking-widest ${theme.usageAccent}`}>
+                  {isCanceled ? 'Subscription Cancelled' : 'Cancel Subscription'}
+                </div>
+                <p className={`text-sm ${theme.usageSub}`}>
+                  {isCanceled
+                    ? (periodEndLabel
+                        ? `Access continues until ${periodEndLabel}, then your account reverts to FREE.`
+                        : 'Your subscription is cancelled.')
+                    : 'Cancel your subscription renewal at the end of the billing cycle.'}
+                </p>
+              </div>
+              {isCanceled ? (
+                <button
+                  type="button"
+                  disabled={subBusy}
+                  onClick={resumeSubscription}
+                  className="h-11 px-4 rounded-full font-semibold text-sm bg-emerald-500 text-white hover:bg-emerald-600 transition-all disabled:opacity-50 disabled:cursor-wait"
+                >
+                  Resume Subscription
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={subBusy}
+                  onClick={() => setRefundModal({ open: true, step: 'confirm' })}
+                  className="h-11 px-4 rounded-full font-semibold text-sm border border-red-200 text-red-600 hover:bg-red-50 transition-all disabled:opacity-50 disabled:cursor-wait"
+                >
+                  Cancel Subscription
+                </button>
+              )}
+            </div>
+
+            {subError && (
+              <div className="mb-6 px-4 py-3 rounded-xl text-sm font-medium border border-red-200 bg-red-50 text-red-700">
+                {subError}
+              </div>
+            )}
+          </>
+        )}
 
         <div className="h-px w-full bg-black/5 mb-6" />
 
@@ -1769,10 +1887,11 @@ function BillingView({ user }: { user: UserProfile | null }) {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setRefundModal({ open: true, step: 'submitted' })}
-                      className="flex-1 py-3 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-500 text-white text-sm font-semibold shadow-[0_6px_18px_rgba(249,115,22,0.3)] transition-all"
+                      disabled={subBusy}
+                      onClick={confirmCancel}
+                      className="flex-1 py-3 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-500 text-white text-sm font-semibold shadow-[0_6px_18px_rgba(249,115,22,0.3)] transition-all disabled:opacity-50 disabled:cursor-wait"
                     >
-                      Confirm cancellation
+                      {subBusy ? 'Cancelling…' : 'Confirm cancellation'}
                     </button>
                   </div>
                 </>
@@ -1783,12 +1902,14 @@ function BillingView({ user }: { user: UserProfile | null }) {
                       <CheckCircle2 className="w-5 h-5 text-green-600" />
                     </div>
                     <div>
-                      <h4 className="font-bold text-neutral-900">Cancellation submitted</h4>
-                      <p className="text-xs text-neutral-400">Our team will review your eligibility.</p>
+                      <h4 className="font-bold text-neutral-900">Subscription cancelled</h4>
+                      <p className="text-xs text-neutral-400">Auto-pay is off.</p>
                     </div>
                   </div>
                   <p className="text-sm text-neutral-600 mb-6">
-                    We will email you if a refund is approved.
+                    {periodEndLabel
+                      ? `You keep full access until ${periodEndLabel}. After that your account reverts to the FREE plan. You can resume any time before then.`
+                      : 'You keep access until the end of your billing period. After that your account reverts to the FREE plan.'}
                   </p>
                   <button
                     type="button"

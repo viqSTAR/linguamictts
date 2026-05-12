@@ -23,6 +23,16 @@ model User {
   plan               PlanTier            @default(FREE)
   planMonthlyCredits Int                 @default(10000)
   planStartedAt      DateTime            @default(now())
+
+  // ── Subscription lifecycle ──────────────────────────────────────────────────
+  // subscriptionStatus values:
+  //   NONE     — FREE plan, no subscription
+  //   ACTIVE   — paid plan, will auto-renew at currentPeriodEnd
+  //   CANCELED — paid plan, will downgrade to FREE at currentPeriodEnd
+  subscriptionStatus String              @default("NONE")
+  currentPeriodEnd   DateTime?
+  autoRenew          Boolean             @default(false)
+  canceledAt         DateTime?
   apiKeys            ApiKey[]
   transactions       CreditTransaction[]
   usageLogs          UsageLog[]

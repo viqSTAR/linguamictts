@@ -1,6 +1,6 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || 'sk_test_dummy');
 const prisma = require('../utils/prisma');
-const { getMonthKey } = require('../utils/credits');
+const { getMonthKey, endOfCurrentMonthUtc } = require('../utils/credits');
 
 // NOTE on credit rates:
 // The dummy/Dodo (future) top-up path is the authoritative source of credits.
@@ -231,6 +231,11 @@ const upgradePlan = async (req, res) => {
             planMonthlyCredits: config.monthlyCredits,
             planStartedAt: new Date(),
             creditsBalance: newBalance,
+            // Activate subscription — auto-renews until user cancels.
+            subscriptionStatus: 'ACTIVE',
+            autoRenew: true,
+            currentPeriodEnd: endOfCurrentMonthUtc(),
+            canceledAt: null,
           },
         });
 
@@ -271,6 +276,177 @@ const getPlanConfig = (req, res) => {
   res.json({ plans: PLAN_CONFIG, planRank: PLAN_RANK, topups: TOPUP_CONFIG });
 };
 
+// ─── Subscription: cancel / resume / status ──────────────────────────────────
+// All three reject FREE users since FREE has no subscription to manage.
+
+const getSubscription = async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.userId },
+      select: {
+        plan: true,
+        subscriptionStatus: true,
+        currentPeriodEnd: true,
+        autoRenew: true,
+        canceledAt: true,
+        planMonthlyCredits: true,
+      },
+    });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    res.json({
+      plan: user.plan,
+      status: user.subscriptionStatus,
+      autoRenew: user.autoRenew,
+      currentPeriodEnd: user.currentPeriodEnd,
+      canceledAt: user.canceledAt,
+      planMonthlyCredits: user.planMonthlyCredits,
+      // Convenience flag for UI gating — FREE plans cannot manage subs.
+      manageable: user.plan !== 'FREE',
+    });
+  } catch (error) {
+    console.error('getSubscription error:', error);
+    res.status(500).json({ error: 'Failed to fetch subscription' });
+  }
+};
+
+const cancelSubscription = async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.userId },
+      select: { plan: true, subscriptionStatus: true, autoRenew: true, currentPeriodEnd: true },
+    });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    if (user.plan === 'FREE') {
+      return res.status(400).json({ error: 'FREE plan has no subscription to cancel.' });
+    }
+    if (user.subscriptionStatus === 'CANCELED' || user.autoRenew === false) {
+      return res.status(400).json({
+        error: 'Subscription is already cancelled.',
+        currentPeriodEnd: user.currentPeriodEnd,
+      });
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: req.userId },
+      data: {
+        subscriptionStatus: 'CANCELED',
+        autoRenew: false,
+        canceledAt: new Date(),
+      },
+      select: {
+        plan: true,
+        subscriptionStatus: true,
+        currentPeriodEnd: true,
+        autoRenew: true,
+        canceledAt: true,
+      },
+    });
+
+    res.json({
+      message: 'Subscription cancelled. You keep access until the end of your billing period.',
+      ...updated,
+    });
+  } catch (error) {
+    console.error('cancelSubscription error:', error);
+    res.status(500).json({ error: 'Failed to cancel subscription' });
+  }
+};
+
+const resumeSubscription = async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.userId },
+      select: { plan: true, subscriptionStatus: true, autoRenew: true, currentPeriodEnd: true },
+    });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    if (user.plan === 'FREE') {
+      return res.status(400).json({ error: 'FREE plan has no subscription to resume.' });
+    }
+    // If the period already expired, the user has effectively been downgraded
+    // (next request to ensureMonthlyCredits will resolve that). They need to
+    // pay/upgrade again, not "resume".
+    if (user.currentPeriodEnd && user.currentPeriodEnd <= new Date()) {
+      return res.status(400).json({ error: 'Billing period has ended. Please upgrade again.' });
+    }
+    if (user.subscriptionStatus === 'ACTIVE' && user.autoRenew) {
+      return res.status(400).json({ error: 'Subscription is already active.' });
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: req.userId },
+      data: {
+        subscriptionStatus: 'ACTIVE',
+        autoRenew: true,
+        canceledAt: null,
+      },
+      select: {
+        plan: true,
+        subscriptionStatus: true,
+        currentPeriodEnd: true,
+        autoRenew: true,
+        canceledAt: true,
+      },
+    });
+
+    res.json({
+      message: 'Subscription resumed. Auto-pay is on.',
+      ...updated,
+    });
+  } catch (error) {
+    console.error('resumeSubscription error:', error);
+    res.status(500).json({ error: 'Failed to resume subscription' });
+  }
+};
+
+const setAutoPay = async (req, res) => {
+  try {
+    const { enabled } = req.body;
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ error: '`enabled` must be a boolean' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.userId },
+      select: { plan: true, subscriptionStatus: true, autoRenew: true, currentPeriodEnd: true },
+    });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    if (user.plan === 'FREE') {
+      return res.status(400).json({ error: 'Auto-pay is only available on paid plans.' });
+    }
+    if (user.currentPeriodEnd && user.currentPeriodEnd <= new Date()) {
+      return res.status(400).json({ error: 'Billing period has ended. Please upgrade again.' });
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: req.userId },
+      data: {
+        autoRenew: enabled,
+        subscriptionStatus: enabled ? 'ACTIVE' : 'CANCELED',
+        canceledAt: enabled ? null : new Date(),
+      },
+      select: {
+        plan: true,
+        subscriptionStatus: true,
+        currentPeriodEnd: true,
+        autoRenew: true,
+        canceledAt: true,
+      },
+    });
+
+    res.json({
+      message: enabled ? 'Auto-pay enabled.' : 'Auto-pay disabled. Plan ends at period end.',
+      ...updated,
+    });
+  } catch (error) {
+    console.error('setAutoPay error:', error);
+    res.status(500).json({ error: 'Failed to update auto-pay setting' });
+  }
+};
+
 module.exports = {
   createPaymentIntent,
   verifyPayment,
@@ -278,4 +454,8 @@ module.exports = {
   upgradePlan,
   getPlanConfig,
   getTransactions,
+  getSubscription,
+  cancelSubscription,
+  resumeSubscription,
+  setAutoPay,
 };

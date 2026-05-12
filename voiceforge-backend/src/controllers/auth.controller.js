@@ -156,6 +156,10 @@ const getMe = async (req, res) => {
         lastAudioMp3Url: true,
         lastAudioUpdatedAt: true,
         presets: true,
+        subscriptionStatus: true,
+        currentPeriodEnd: true,
+        autoRenew: true,
+        canceledAt: true,
       },
     });
 

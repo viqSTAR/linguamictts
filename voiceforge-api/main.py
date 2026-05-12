@@ -108,11 +108,12 @@ def require_internal_key(authorization: Optional[str] = Header(None)):
 #     generation. Anything higher makes the model speak faster, which is the
 #     dominant cause of word-skipping in long chunks.
 DEFAULT_TEMPERATURE = 0.55
-# top_p 0.85 (was 0.90) — Canopy's stable band is 0.6-0.9. At 0.90 the model
-# occasionally drops words mid-list ("built for creators" → "built profess…")
-# and lets emotion-token sampling drift (laugh → yawn). 0.85 keeps prosodic
-# variation while pulling the nucleus tighter.
-DEFAULT_TOP_P = 0.85
+# top_p 0.80 — tighter than Lex-au's 0.90 default. At 0.85 we still saw
+# occasional adjacent-word merging ("believe communication" → "believe-communi-cation");
+# 0.80 stays inside Canopy's stable band (0.6-0.9) while pulling the nucleus
+# in further. Trade-off: slightly less prosodic variation, more predictable
+# articulation.
+DEFAULT_TOP_P = 0.80
 DEFAULT_REP_PENALTY = 1.10
 
 # Tone presets — each tone has a distinct enough parameter spread so they
@@ -162,6 +163,25 @@ _EMOTION_TAG_RE = re.compile(r'<(\w+)>')
 # Combined they cover all canonical CamelCase / PascalCase forms.
 _CAMEL_ACRONYM_RE = re.compile(r'([A-Z])([A-Z][a-z])')
 _CAMEL_LOWER_UPPER_RE = re.compile(r'([a-z])([A-Z])')
+
+
+# Pronunciation overrides applied AFTER CamelCase split — for words the
+# tokenizer/model is ambiguous about. Keys are matched as literal substrings
+# (case-sensitive). Add more entries as new brand words appear.
+#
+# Why these:
+#   "Lingua Mic" → "Mic" by itself rhymes with both "Mike" (microphone) and
+#                  "mick"; the model samples both at temperature 0.55.
+#                  "Mike" forces the intended pronunciation.
+PRONUNCIATION_OVERRIDES = {
+    "Lingua Mic": "Lingua Mike",
+}
+
+
+def apply_pronunciation_overrides(text: str) -> str:
+    for src, dst in PRONUNCIATION_OVERRIDES.items():
+        text = text.replace(src, dst)
+    return text
 
 
 def split_camelcase_words(text: str) -> str:
@@ -257,40 +277,10 @@ def split_text(text, max_chars=300):
         if not sentence:
             continue
 
-        # ─── Sentence-leading emotion tag ────────────────────────────────────
-        # Orpheus emotion tags render most fully when placed MID-SENTENCE with
-        # words on both sides — that's the canonical training pattern
-        # ("...that's interesting <laugh> I hadn't thought of that..."). When
-        # a user writes "<laugh> Our mission..." we slide the tag forward to
-        # the first natural break inside that sentence, so it ends up between
-        # clauses rather than as vocal punctuation at a sentence boundary
-        # (boundary tags render as a clipped gasp/cough-length sound).
-        #
-        # Strategy:
-        #   1. If a comma exists within the first ~50 chars, slide the tag
-        #      just before that comma — natural mid-clause position.
-        #   2. Otherwise slide the tag past the first 2 words.
-        #   3. If the sentence is too short to do either, keep the tag at
-        #      the start and let _generate_chunk's emotion-aware sampling
-        #      handle it.
-        while True:
-            m = re.match(r'^\s*(<\w+>)\s+(.+)$', sentence, re.DOTALL)
-            if not m:
-                break
-            tag, body = m.group(1), m.group(2).strip()
-            comma_pos = body.find(',')
-            if 0 < comma_pos < 50:
-                sentence = f"{body[:comma_pos]} {tag}{body[comma_pos:]}"
-            else:
-                parts = body.split(' ', 2)
-                if len(parts) >= 3:
-                    sentence = f"{parts[0]} {parts[1]} {tag} {parts[2]}"
-                else:
-                    # Too short to reposition — keep as-is, accept reduced
-                    # emotion expression.
-                    sentence = f"{tag} {body}"
-                    break
-            # One pass per leading tag; loop in case of stacked tags.
+        # Emotion tags stay exactly where the user typed them — no
+        # repositioning. The audio-primer token fix in format_prompt gives
+        # the model enough grounding to render full-length emotions even at
+        # sentence-leading positions, so we no longer need to slide tags.
 
         # Handle the case where the entire input begins with a bare tag and
         # there's nothing after it.
@@ -512,6 +502,12 @@ def tts(req: TTSRequest, _auth: bool = Depends(require_internal_key)):
     # uses the ORIGINAL req.text length so users aren't charged for the
     # auto-inserted spaces.
     clean_text = split_camelcase_words(clean_text)
+
+    # Force consistent pronunciation for ambiguous brand words. "Mic" alone
+    # rhymes with both "Mike" and "mick" depending on sampling; the override
+    # locks it to "Mike". Extend PRONUNCIATION_OVERRIDES as new brand words
+    # appear.
+    clean_text = apply_pronunciation_overrides(clean_text)
 
     if not clean_text.strip():
         raise HTTPException(400, "Text is empty after removing invalid emotion tags")

@@ -174,31 +174,55 @@ const getMe = async (req, res) => {
   }
 };
 
-// Verify a Google access token against tokeninfo so we know the audience
-// (issued for OUR client_id) and the email is verified. Without this, any
-// access token from any Google client could log in here.
+// Verify a Google access token via the tokeninfo endpoint to confirm the
+// audience matches our client_id (defeats the cross-client token replay
+// attack), then fetch the actual profile from userinfo. tokeninfo for OAuth
+// access tokens does NOT always include `email` even if the token has that
+// scope — userinfo is the right place to read profile fields.
 const verifyGoogleAccessToken = async (accessToken) => {
-  const { data } = await axios.get('https://oauth2.googleapis.com/tokeninfo', {
-    params: { access_token: accessToken },
-    timeout: 5000,
-  });
   const expectedAud = process.env.GOOGLE_CLIENT_ID;
   if (!expectedAud) throw new Error('GOOGLE_CLIENT_ID not configured');
-  if (data.aud !== expectedAud && data.azp !== expectedAud) {
-    throw new Error('Token audience mismatch');
-  }
-  if (!data.email) {
-    throw new Error('Token has no email scope');
+
+  // Step 1 — audience check (the security gate).
+  let tokenInfo;
+  try {
+    const response = await axios.get('https://oauth2.googleapis.com/tokeninfo', {
+      params: { access_token: accessToken },
+      timeout: 5000,
+    });
+    tokenInfo = response.data;
+  } catch (err) {
+    const status = err && err.response ? err.response.status : undefined;
+    const body = err && err.response ? err.response.data : undefined;
+    throw new Error(`tokeninfo lookup failed (status=${status}): ${JSON.stringify(body) || err.message}`);
   }
 
-  // tokeninfo doesn't always return email_verified; fall back to userinfo for profile.
-  const userinfo = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
-    headers: { Authorization: `Bearer ${accessToken}` },
-    timeout: 5000,
-  }).then(r => r.data).catch(() => ({}));
+  if (tokenInfo.aud !== expectedAud && tokenInfo.azp !== expectedAud) {
+    throw new Error(`Token audience mismatch: aud=${tokenInfo.aud}, azp=${tokenInfo.azp}, expected=${expectedAud}`);
+  }
+
+  // Step 2 — fetch the actual profile (email, name, picture). Required to
+  // know who the user is; missing email here means the token has no email
+  // scope, so we can't log them in.
+  let userinfo;
+  try {
+    const response = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      timeout: 5000,
+    });
+    userinfo = response.data;
+  } catch (err) {
+    const status = err && err.response ? err.response.status : undefined;
+    const body = err && err.response ? err.response.data : undefined;
+    throw new Error(`userinfo lookup failed (status=${status}): ${JSON.stringify(body) || err.message}`);
+  }
+
+  if (!userinfo.email) {
+    throw new Error('Google account has no email — re-grant email scope on sign-in');
+  }
 
   return {
-    email: data.email,
+    email: userinfo.email,
     email_verified: userinfo.email_verified !== false,
     name: userinfo.name,
     picture: userinfo.picture,
@@ -228,7 +252,8 @@ const googleAuth = async (req, res) => {
         payload = await verifyGoogleAccessToken(credential);
       }
     } catch (e) {
-      console.warn('Google token verification failed:', e.message);
+      // Log full context so we can diagnose audience/scope issues from logs.
+      console.warn('Google token verification failed:', e && (e.stack || e.message));
       return res.status(401).json({ error: 'Invalid Google token' });
     }
 
@@ -296,7 +321,8 @@ const googleAuth = async (req, res) => {
       ...(isNewUser && newApiKey ? { apiKey: newApiKey } : {}),
     });
   } catch (error) {
-    console.error('Google Auth error:', error);
+    // Surface stack + Prisma error code so Render logs show what actually broke.
+    console.error('Google Auth error:', error && (error.stack || error.message), 'code=', error && error.code);
     res.status(500).json({ error: 'Internal server error during Google auth' });
   }
 };

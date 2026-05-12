@@ -38,6 +38,10 @@ export default function Login() {
   };
 
   const loginGoogle = useGoogleLogin({
+    // Explicit scopes so the access token always carries email + profile,
+    // otherwise Google may issue a token whose userinfo endpoint returns no
+    // email and the backend rejects the login.
+    scope: 'openid email profile',
     onSuccess: async (tokenResponse) => {
       try {
         setLoading(true);

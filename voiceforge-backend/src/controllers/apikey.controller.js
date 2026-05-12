@@ -1,6 +1,7 @@
-const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const prisma = require('../utils/prisma');
+
+const MAX_KEYS_PER_USER = 5;
 
 const listKeys = async (req, res) => {
   try {
@@ -13,36 +14,39 @@ const listKeys = async (req, res) => {
         createdAt: true,
         lastUsedAt: true,
       },
+      orderBy: { createdAt: 'desc' },
     });
     res.json({ keys });
   } catch (error) {
+    console.error('listKeys error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
 
 const createKey = async (req, res) => {
   try {
-    const { name } = req.body;
-    
-    // Check key limit (e.g. max 5 keys)
+    const { name } = req.body || {};
+
     const count = await prisma.apiKey.count({
-      where: { userId: req.userId, isActive: true }
+      where: { userId: req.userId, isActive: true },
     });
-    
-    if (count >= 5) {
-      return res.status(400).json({ error: 'Maximum API key limit reached (5)' });
+
+    if (count >= MAX_KEYS_PER_USER) {
+      return res.status(400).json({ error: `Maximum API key limit reached (${MAX_KEYS_PER_USER})` });
     }
 
     const rawApiKey = crypto.randomBytes(32).toString('hex');
     const keyHash = crypto.createHash('sha256').update(rawApiKey).digest('hex');
     const prefix = `vf_${rawApiKey.substring(0, 4)}`;
 
+    const cleanName = typeof name === 'string' && name.trim() ? name.trim().slice(0, 64) : 'New API Key';
+
     const newKey = await prisma.apiKey.create({
       data: {
         userId: req.userId,
-        keyHash: keyHash,
-        prefix: prefix,
-        name: name || 'New API Key',
+        keyHash,
+        prefix,
+        name: cleanName,
       },
     });
 
@@ -57,6 +61,7 @@ const createKey = async (req, res) => {
       rawApiKey, // ONLY shown once!
     });
   } catch (error) {
+    console.error('createKey error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -64,7 +69,7 @@ const createKey = async (req, res) => {
 const revokeKey = async (req, res) => {
   try {
     const { keyId } = req.params;
-    
+
     const key = await prisma.apiKey.findFirst({
       where: { id: keyId, userId: req.userId },
     });
@@ -80,6 +85,7 @@ const revokeKey = async (req, res) => {
 
     res.json({ message: 'API key revoked successfully' });
   } catch (error) {
+    console.error('revokeKey error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };

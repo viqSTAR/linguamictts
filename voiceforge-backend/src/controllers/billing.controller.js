@@ -2,32 +2,34 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || 'sk_test_dummy
 const prisma = require('../utils/prisma');
 const { getMonthKey } = require('../utils/credits');
 
-// Stripe: $1 = 100 cents = 10,000 credits → 1 cent = 100 credits
-const CREDITS_PER_CENT = 100;
-
-// Plan hierarchy — higher number = higher plan (used for upgrade enforcement)
+// NOTE on credit rates:
+// The dummy/Dodo (future) top-up path is the authoritative source of credits.
+// The Stripe verifyPayment branch below is dormant — Stripe will be replaced
+// by Dodo. Both paths now share TOPUP_CONFIG so the credit rate is identical.
 const PLAN_RANK = { FREE: 0, STARTER: 1, CREATOR: 2, PRO: 3 };
 
-// Canonical plan definitions — single source of truth
 const PLAN_CONFIG = {
   STARTER: { monthlyCredits: 45000,  priceUSD: 4.99  },
   CREATOR: { monthlyCredits: 210000, priceUSD: 18.99 },
   PRO:     { monthlyCredits: 850000, priceUSD: 79.99 },
 };
 
-// Add-on top-up credit tiers
 const TOPUP_CONFIG = [
   { amountUSD: 1,  credits: 5000  },
   { amountUSD: 5,  credits: 25000 },
   { amountUSD: 10, credits: 55000 },
 ];
 
+const MAX_TOPUP_USD = 1000;
+
 const getTopUpCredits = (amountUSD) => {
   const tier = TOPUP_CONFIG.find(t => t.amountUSD === amountUSD);
   return tier ? tier.credits : Math.round(amountUSD * 5000);
 };
 
-// ─── Transaction History (credits) ─────────────────────────────────────────
+const isDuplicateTxn = (err) => err && err.code === 'P2002';
+
+// ─── Transaction History ──────────────────────────────────────────────────────
 const getTransactions = async (req, res) => {
   try {
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
@@ -52,12 +54,12 @@ const getTransactions = async (req, res) => {
   }
 };
 
-// ─── Stripe: Create Payment Intent ────────────────────────────────────────────
+// ─── Stripe: Create Payment Intent (dormant; kept for future) ────────────────
 const createPaymentIntent = async (req, res) => {
   try {
     const { amountUSD } = req.body;
-    if (!amountUSD || amountUSD < 1) {
-      return res.status(400).json({ error: 'Minimum amount is $1' });
+    if (!Number.isFinite(amountUSD) || amountUSD < 1 || amountUSD > MAX_TOPUP_USD) {
+      return res.status(400).json({ error: `Amount must be between $1 and $${MAX_TOPUP_USD}` });
     }
     const amountInCents = Math.round(amountUSD * 100);
     const paymentIntent = await stripe.paymentIntents.create({
@@ -72,7 +74,7 @@ const createPaymentIntent = async (req, res) => {
   }
 };
 
-// ─── Stripe: Verify Payment (used for add-on top-ups via Stripe) ─────────────
+// ─── Stripe: Verify Payment (dormant; kept for future) ───────────────────────
 const verifyPayment = async (req, res) => {
   try {
     const { paymentIntentId } = req.body;
@@ -86,84 +88,96 @@ const verifyPayment = async (req, res) => {
     if (paymentIntent.status !== 'succeeded') {
       return res.status(400).json({ error: `Payment status is ${paymentIntent.status}, not succeeded` });
     }
-    const existingTransaction = await prisma.creditTransaction.findFirst({
-      where: { referenceId: paymentIntentId },
-    });
-    if (existingTransaction) {
-      return res.status(400).json({ error: 'Payment already processed' });
-    }
-    const amountInCents = paymentIntent.amount;
-    const creditsToStore = amountInCents * CREDITS_PER_CENT;
 
-    // Add-on credits: permanently tracked in addonCredits + added to balance
-    const updatedUser = await prisma.$transaction(async (tx) => {
-      await tx.creditTransaction.create({
-        data: {
-          userId: req.userId,
-          amount: creditsToStore,
-          type: 'ADDON_TOPUP',
-          description: `Stripe add-on top-up of $${(amountInCents / 100).toFixed(2)} — ${creditsToStore.toLocaleString()} permanent credits`,
-          referenceId: paymentIntentId,
-        },
+    // Match dummy rate: same TOPUP_CONFIG formula in both branches.
+    const amountUSD = paymentIntent.amount / 100;
+    const creditsToStore = getTopUpCredits(amountUSD);
+
+    try {
+      const updatedUser = await prisma.$transaction(async (tx) => {
+        await tx.creditTransaction.create({
+          data: {
+            userId: req.userId,
+            amount: creditsToStore,
+            type: 'ADDON_TOPUP',
+            description: `Stripe add-on top-up of $${amountUSD.toFixed(2)} — ${creditsToStore.toLocaleString()} permanent credits`,
+            referenceId: paymentIntentId,
+          },
+        });
+        return await tx.user.update({
+          where: { id: req.userId },
+          data: {
+            creditsBalance: { increment: creditsToStore },
+            addonCredits: { increment: creditsToStore },
+          },
+        });
       });
-      return await tx.user.update({
-        where: { id: req.userId },
-        data: {
-          creditsBalance: { increment: creditsToStore },
-          addonCredits: { increment: creditsToStore },
-        },
+      return res.json({
+        message: 'Payment verified and permanent credits added',
+        newBalance: updatedUser.creditsBalance,
+        addonCredits: updatedUser.addonCredits,
       });
-    });
-    res.json({ message: 'Payment verified and permanent credits added', newBalance: updatedUser.creditsBalance, addonCredits: updatedUser.addonCredits });
+    } catch (txErr) {
+      if (isDuplicateTxn(txErr)) {
+        return res.status(409).json({ error: 'Payment already processed' });
+      }
+      throw txErr;
+    }
   } catch (error) {
     console.error('Stripe Verify Error:', error);
     res.status(500).json({ error: 'Failed to verify Stripe payment' });
   }
 };
 
-// ─── Dummy Add-on Top-Up (Permanent credits, never reset) ────────────────────
+// ─── Dummy Add-on Top-Up (active until Dodo Payment integration) ─────────────
 const dummyTopUp = async (req, res) => {
   try {
     const { amountUSD } = req.body;
-    if (!amountUSD || amountUSD < 1) {
-      return res.status(400).json({ error: 'Minimum amount is $1' });
+    if (!Number.isFinite(amountUSD) || amountUSD < 1 || amountUSD > MAX_TOPUP_USD) {
+      return res.status(400).json({ error: `Amount must be between $1 and $${MAX_TOPUP_USD}` });
     }
     const creditsToStore = getTopUpCredits(amountUSD);
-    const dummyTransactionId = `dummy_addon_${Date.now()}`;
+    const dummyTransactionId = `dummy_addon_${req.userId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-    // Add-on credits are PERMANENT — tracked in addonCredits, added to balance
-    const updatedUser = await prisma.$transaction(async (tx) => {
-      await tx.creditTransaction.create({
-        data: {
-          userId: req.userId,
-          amount: creditsToStore,
-          type: 'ADDON_TOPUP',
-          description: `Add-on pack of $${amountUSD} — ${creditsToStore.toLocaleString()} permanent credits`,
-          referenceId: dummyTransactionId,
-        },
+    try {
+      const updatedUser = await prisma.$transaction(async (tx) => {
+        await tx.creditTransaction.create({
+          data: {
+            userId: req.userId,
+            amount: creditsToStore,
+            type: 'ADDON_TOPUP',
+            description: `Add-on pack of $${amountUSD} — ${creditsToStore.toLocaleString()} permanent credits`,
+            referenceId: dummyTransactionId,
+          },
+        });
+        return await tx.user.update({
+          where: { id: req.userId },
+          data: {
+            creditsBalance: { increment: creditsToStore },
+            addonCredits: { increment: creditsToStore },
+          },
+        });
       });
-      return await tx.user.update({
-        where: { id: req.userId },
-        data: {
-          creditsBalance: { increment: creditsToStore },
-          addonCredits: { increment: creditsToStore },
-        },
-      });
-    });
 
-    res.json({
-      message: 'Add-on credits added permanently to your account',
-      newBalance: updatedUser.creditsBalance,
-      addonCredits: updatedUser.addonCredits,
-      creditsAdded: creditsToStore,
-    });
+      return res.json({
+        message: 'Add-on credits added permanently to your account',
+        newBalance: updatedUser.creditsBalance,
+        addonCredits: updatedUser.addonCredits,
+        creditsAdded: creditsToStore,
+      });
+    } catch (txErr) {
+      if (isDuplicateTxn(txErr)) {
+        return res.status(409).json({ error: 'Duplicate top-up request' });
+      }
+      throw txErr;
+    }
   } catch (error) {
     console.error('Dummy TopUp Error:', error);
     res.status(500).json({ error: 'Failed to process top-up' });
   }
 };
 
-// ─── Plan Upgrade (upgrade-only, carries over remaining credits) ──────────────
+// ─── Plan Upgrade ────────────────────────────────────────────────────────────
 const upgradePlan = async (req, res) => {
   try {
     const { plan } = req.body;
@@ -173,7 +187,6 @@ const upgradePlan = async (req, res) => {
       return res.status(400).json({ error: 'Invalid plan. Must be STARTER, CREATOR, or PRO.' });
     }
 
-    // Fetch current user
     const currentUser = await prisma.user.findUnique({
       where: { id: req.userId },
       select: { plan: true, creditsBalance: true, planMonthlyCredits: true, addonCredits: true },
@@ -183,7 +196,6 @@ const upgradePlan = async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // ── ENFORCE UPGRADE-ONLY ──────────────────────────────────────────────────
     const currentRank = PLAN_RANK[currentUser.plan] ?? 0;
     const newRank = PLAN_RANK[planKey] ?? 0;
 
@@ -195,67 +207,68 @@ const upgradePlan = async (req, res) => {
     }
 
     const config = PLAN_CONFIG[planKey];
-    const monthKey = getMonthKey(new Date());
 
-    // ── CARRY-OVER CALCULATION ────────────────────────────────────────────────
-    // Remaining plan credits = total balance − addon credits (plan credits only)
-    // Carry over remaining plan credits + full new plan allocation
     const currentAddonCredits = currentUser.addonCredits ?? 0;
     const currentPlanBalance = Math.max(0, currentUser.creditsBalance - currentAddonCredits);
-    
-    // New balance = new plan allocation + remaining old plan credits + addon credits
     const newBalance = config.monthlyCredits + currentPlanBalance + currentAddonCredits;
     const carryOver = currentPlanBalance;
 
-    const updatedUser = await prisma.$transaction(async (tx) => {
-      // Remove this month's MONTHLY_RESET so the new tier applies cleanly at next reset
-      await tx.creditTransaction.deleteMany({
-        where: { userId: req.userId, type: 'MONTHLY_RESET', referenceId: monthKey },
+    const referenceId = `plan_${planKey}_${req.userId}_${Date.now()}`;
+
+    try {
+      const updatedUser = await prisma.$transaction(async (tx) => {
+        // CRITICAL: do NOT delete the current month's MONTHLY_RESET row.
+        // Deleting it causes ensureMonthlyCredits to re-fire on the very next
+        // authenticated request, which overwrites creditsBalance back to
+        // (planMonthlyCredits + addonCredits) — wiping the carry-over we just
+        // credited below. The MONTHLY_RESET row stays as a marker that the
+        // month was already reset; the new tier naturally applies next month.
+
+        const user = await tx.user.update({
+          where: { id: req.userId },
+          data: {
+            plan: planKey,
+            planMonthlyCredits: config.monthlyCredits,
+            planStartedAt: new Date(),
+            creditsBalance: newBalance,
+          },
+        });
+
+        await tx.creditTransaction.create({
+          data: {
+            userId: req.userId,
+            amount: config.monthlyCredits,
+            type: 'PLAN_UPGRADE',
+            description: `Upgraded to ${planKey} — ${config.monthlyCredits.toLocaleString()} credits granted + ${carryOver.toLocaleString()} carried over from previous plan`,
+            referenceId,
+          },
+        });
+
+        return user;
       });
 
-      // Set new plan and new balance (with carry-over)
-      const user = await tx.user.update({
-        where: { id: req.userId },
-        data: {
-          plan: planKey,
-          planMonthlyCredits: config.monthlyCredits,
-          planStartedAt: new Date(),
-          creditsBalance: newBalance,
-          // addonCredits is NOT changed — it stays permanent
-        },
+      return res.json({
+        message: `Successfully upgraded to ${planKey} plan`,
+        plan: updatedUser.plan,
+        newBalance: updatedUser.creditsBalance,
+        planMonthlyCredits: updatedUser.planMonthlyCredits,
+        carryOverCredits: carryOver,
+        addonCredits: updatedUser.addonCredits,
       });
-
-      // Audit: plan upgrade entry
-      await tx.creditTransaction.create({
-        data: {
-          userId: req.userId,
-          amount: config.monthlyCredits,
-          type: 'PLAN_UPGRADE',
-          description: `Upgraded to ${planKey} — ${config.monthlyCredits.toLocaleString()} credits granted + ${carryOver.toLocaleString()} carried over from previous plan`,
-          referenceId: `plan_${planKey}_${Date.now()}`,
-        },
-      });
-
-      return user;
-    });
-
-    res.json({
-      message: `Successfully upgraded to ${planKey} plan`,
-      plan: updatedUser.plan,
-      newBalance: updatedUser.creditsBalance,
-      planMonthlyCredits: updatedUser.planMonthlyCredits,
-      carryOverCredits: carryOver,
-      addonCredits: updatedUser.addonCredits,
-    });
+    } catch (txErr) {
+      if (isDuplicateTxn(txErr)) {
+        return res.status(409).json({ error: 'Duplicate upgrade request' });
+      }
+      throw txErr;
+    }
   } catch (error) {
     console.error('Plan Upgrade Error:', error);
-    res.status(500).json({ error: 'Failed to upgrade plan', details: error.message, stack: error.stack });
+    res.status(500).json({ error: 'Failed to upgrade plan', details: error.message });
   }
 };
 
-// ─── Get Plan Config (for frontend reference) ─────────────────────────────────
 const getPlanConfig = (req, res) => {
-  res.json({ plans: PLAN_CONFIG, planRank: PLAN_RANK });
+  res.json({ plans: PLAN_CONFIG, planRank: PLAN_RANK, topups: TOPUP_CONFIG });
 };
 
 module.exports = {

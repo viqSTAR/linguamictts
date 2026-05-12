@@ -51,6 +51,13 @@ model CreditTransaction {
   referenceId String?
   createdAt   DateTime @default(now())
   user        User     @relation(fields: [userId], references: [id])
+
+  // Idempotency: one transaction per (user, type, referenceId). Prevents
+  // duplicate top-ups when /verify or /dummy-topup is called twice with the
+  // same payment id, and one MONTHLY_RESET per user per month.
+  // Postgres allows multiple NULL referenceIds, so legacy rows without one
+  // (e.g. raw USAGE_DEDUCT logs) are unaffected.
+  @@unique([userId, type, referenceId], name: "uniq_user_tx_ref")
 }
 
 model UsageLog {

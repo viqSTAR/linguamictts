@@ -6,6 +6,13 @@ const os = require('os');
 const path = require('path');
 const ffmpegPath = require('ffmpeg-static');
 const { r2Enabled, buildAudioKey, uploadAudioBuffer, deleteAudioObject, getAudioObject } = require('../utils/r2');
+const {
+  computeTtsCredits,
+  computeSttCredits,
+  reserveCredits,
+  refundCredits,
+  logUsage,
+} = require('../utils/credits');
 
 const FASTAPI_URL = process.env.FASTAPI_URL || 'http://localhost:8000';
 const FASTAPI_INTERNAL_KEY = process.env.FASTAPI_INTERNAL_KEY || 'default_dev_key';
@@ -21,6 +28,47 @@ const DEMO_ALLOWED_KEYS = new Set([
   'speed',
 ]);
 const DEMO_ALLOWED_VOICES = new Set(['tara', 'leah', 'jess', 'leo', 'dan', 'mia', 'zac', 'zoe']);
+const DEMO_ALLOWED_TONES = new Set([
+  'calm', 'romantic', 'storytelling', 'horror', 'angry',
+  'adventurous', 'excited', 'sad', 'funny',
+]);
+
+// Defensive numeric bounds so a tampered request can't blow up the model.
+const NUMERIC_BOUNDS = {
+  temperature: { min: 0, max: 1.5 },
+  top_p: { min: 0, max: 1 },
+  repetition_penalty: { min: 1, max: 2 },
+  speed: { min: 0.5, max: 2 },
+};
+
+const isInRange = (value, bound) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return false;
+  return value >= bound.min && value <= bound.max;
+};
+
+const validateTtsPayload = (body, { maxChars }) => {
+  if (!body || typeof body !== 'object') {
+    return { ok: false, error: 'Invalid request body' };
+  }
+  if (typeof body.text !== 'string' || body.text.trim().length === 0) {
+    return { ok: false, error: 'Text is required' };
+  }
+  if (typeof maxChars === 'number' && body.text.length > maxChars) {
+    return { ok: false, error: `Text too long. Max ${maxChars} chars.` };
+  }
+  if (body.voice !== undefined && (typeof body.voice !== 'string' || body.voice.length > 32)) {
+    return { ok: false, error: 'Invalid voice' };
+  }
+  if (body.tone !== undefined && body.tone !== null && (typeof body.tone !== 'string' || body.tone.length > 32)) {
+    return { ok: false, error: 'Invalid tone' };
+  }
+  for (const key of ['temperature', 'top_p', 'repetition_penalty', 'speed']) {
+    if (body[key] !== undefined && body[key] !== null && !isInRange(body[key], NUMERIC_BOUNDS[key])) {
+      return { ok: false, error: `Invalid ${key}` };
+    }
+  }
+  return { ok: true };
+};
 
 const validateDemoPayload = (body) => {
   if (!body || typeof body !== 'object') {
@@ -33,78 +81,17 @@ const validateDemoPayload = (body) => {
     return { ok: false, error: 'Invalid demo payload' };
   }
 
-  const text = body.text;
-  if (typeof text !== 'string' || text.trim().length === 0) {
-    return { ok: false, error: 'Demo text is required' };
-  }
-  if (text.length > DEMO_MAX_CHARS) {
-    return { ok: false, error: `Demo text too long. Max ${DEMO_MAX_CHARS} chars.` };
-  }
+  const base = validateTtsPayload(body, { maxChars: DEMO_MAX_CHARS });
+  if (!base.ok) return base;
 
   if (body.voice && !DEMO_ALLOWED_VOICES.has(body.voice)) {
     return { ok: false, error: 'Invalid demo voice' };
   }
-
-  return { ok: true };
-};
-
-const getUserCredits = async (userId) => {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { creditsBalance: true },
-  });
-  return user ? user.creditsBalance : 0;
-};
-
-const deductCreditsAndLog = async ({
-  userId,
-  apiKeyId,
-  endpointType,
-  creditsDeducted,
-  charsCount,
-  emotionTagsCount,
-  toneUsed,
-}) => {
-  if (creditsDeducted <= 0) {
-    const creditsRemaining = await getUserCredits(userId);
-    return { ok: true, creditsRemaining };
+  if (body.tone && !DEMO_ALLOWED_TONES.has(body.tone)) {
+    return { ok: false, error: 'Invalid demo tone' };
   }
 
-  const result = await prisma.$transaction(async (tx) => {
-    const user = await tx.user.findUnique({
-      where: { id: userId },
-      select: { creditsBalance: true },
-    });
-
-    if (!user) {
-      return { ok: false, creditsRemaining: 0 };
-    }
-
-    if (user.creditsBalance < creditsDeducted) {
-      return { ok: false, creditsRemaining: user.creditsBalance };
-    }
-
-    const updatedUser = await tx.user.update({
-      where: { id: userId },
-      data: { creditsBalance: { decrement: creditsDeducted } },
-    });
-
-    await tx.usageLog.create({
-      data: {
-        userId,
-        apiKeyId,
-        endpointType,
-        charsCount,
-        emotionTagsCount,
-        toneUsed,
-        creditsDeducted,
-      },
-    });
-
-    return { ok: true, creditsRemaining: updatedUser.creditsBalance };
-  });
-
-  return result;
+  return { ok: true };
 };
 
 const convertWavToMp3 = async (wavBuffer) => {
@@ -120,177 +107,50 @@ const convertWavToMp3 = async (wavBuffer) => {
     await new Promise((resolve, reject) => {
       const ff = spawn(ffmpegPath, ['-y', '-i', wavPath, '-codec:a', 'libmp3lame', '-qscale:a', '2', mp3Path]);
       let errBuffer = '';
+      let settled = false;
 
-      ff.stderr.on('data', (data) => {
-        errBuffer += data.toString();
-      });
+      const finish = (err) => {
+        if (settled) return;
+        settled = true;
+        if (err) reject(err);
+        else resolve();
+      };
 
+      ff.stderr.on('data', (data) => { errBuffer += data.toString(); });
+      ff.on('error', (err) => finish(err));
       ff.on('close', (code) => {
-        if (code === 0) resolve();
-        else reject(new Error(errBuffer || 'ffmpeg conversion failed'));
+        if (code === 0) finish();
+        else finish(new Error(errBuffer || `ffmpeg exited with code ${code}`));
       });
     });
 
     const mp3Buffer = await fs.readFile(mp3Path);
     return mp3Buffer;
   } finally {
-    await fs.rm(tmpDir, { recursive: true, force: true });
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
 };
 
-const proxyTTS = async (req, res) => {
-  try {
-    if (req.user.creditsBalance <= 0) {
-      return res.status(402).json({ error: 'Insufficient credits. Please top up your balance.' });
-    }
-
-    const response = await axios.post(`${FASTAPI_URL}/v1/tts`, req.body, {
-      headers: {
-        'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      responseType: 'stream',
-      validateStatus: (status) => true, // Don't throw on 4xx/5xx
-    });
-
-    if (response.status !== 200) {
-      // Forward error response directly
-      res.status(response.status);
-      for (const [key, value] of Object.entries(response.headers)) {
-        res.setHeader(key, value);
-      }
-      return response.data.pipe(res);
-    }
-
-    // Extract headers
-    const creditsDeducted = parseInt(response.headers['x-credits-deducted'] || '0', 10);
-    const charCount = parseInt(response.headers['x-char-count'] || '0', 10);
-    const emotionTags = parseInt(response.headers['x-emotion-tag-count'] || '0', 10);
-    const tone = response.headers['x-tone'] || null;
-
-    const deduction = await deductCreditsAndLog({
-      userId: req.user.id,
-      apiKeyId: req.apiKey.id,
-      endpointType: 'TTS',
-      creditsDeducted,
-      charsCount: charCount,
-      emotionTagsCount: emotionTags,
-      toneUsed: tone,
-    });
-
-    if (!deduction.ok) {
-      return res.status(402).json({ error: 'Insufficient credits. Please top up your balance.' });
-    }
-
-    const updatedBalance = deduction.creditsRemaining;
-
-    // Forward headers but set x-credits-remaining authoritatively from our deduction result
-    for (const [key, value] of Object.entries(response.headers)) {
-      if (key.toLowerCase() !== 'x-credits-remaining') {
-        res.setHeader(key, value);
-      }
-    }
-    res.setHeader('x-credits-remaining', updatedBalance.toString());
-    
-    // Add chunked headers for live streaming
-    res.setHeader('Transfer-Encoding', 'chunked');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Access-Control-Expose-Headers', 'x-credits-remaining, x-credits-deducted, x-char-count, x-emotion-tag-count, x-tone');
-    
-    // Pipe audio data to client
-    response.data.pipe(res);
-
-  } catch (error) {
-    console.error('Proxy TTS Error:', error.message);
-    res.status(500).json({ error: 'Failed to communicate with TTS engine' });
+// Common reserve→call→reconcile flow used by both API-key and Studio TTS.
+// Returns the upstream axios response on success, or null after sending an error.
+const performBilledTts = async ({ req, res, userId, apiKeyId, endpointType }) => {
+  const payloadCheck = validateTtsPayload(req.body, { maxChars: 50000 });
+  if (!payloadCheck.ok) {
+    res.status(400).json({ error: payloadCheck.error });
+    return null;
   }
-};
 
-const proxySTT = async (req, res) => {
-  try {
-    if (req.user.creditsBalance <= 0) {
-      return res.status(402).json({ error: 'Insufficient credits. Please top up your balance.' });
-    }
+  const { charCount, emotionCount, credits: expectedCredits } = computeTtsCredits(req.body.text);
 
-    // Pass the file using FormData
-    const FormData = require('form-data');
-    const form = new FormData();
-    
-    if (req.file) {
-       form.append('file', req.file.buffer, req.file.originalname);
-    } else {
-       return res.status(400).json({ error: 'Audio file is required' });
-    }
-
-    const response = await axios.post(`${FASTAPI_URL}/v1/stt`, form, {
-      headers: {
-        'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}`,
-        ...form.getHeaders(),
-      },
-      validateStatus: (status) => true,
-    });
-
-    if (response.status !== 200) {
-      return res.status(response.status).json(response.data);
-    }
-
-    // Flat cost for STT or calculate based on duration
-    const duration = response.data.duration || 0;
-    const creditsDeducted = Math.ceil(duration) * 2; // e.g. 2 credits per second
-
-    const deduction = await deductCreditsAndLog({
-      userId: req.user.id,
-      apiKeyId: req.apiKey.id,
-      endpointType: 'STT',
-      creditsDeducted,
-    });
-
-    if (!deduction.ok) {
-      return res.status(402).json({ error: 'Insufficient credits. Please top up your balance.' });
-    }
-
-    const updatedBalance = deduction.creditsRemaining;
-
-    res.json({
-       ...response.data,
-       billing: {
-         creditsDeducted,
-         creditsRemaining: updatedBalance
-       }
-    });
-
-  } catch (error) {
-    console.error('Proxy STT Error:', error.message);
-    res.status(500).json({ error: 'Failed to communicate with STT engine' });
+  const reservation = await reserveCredits(userId, expectedCredits);
+  if (!reservation.ok) {
+    res.status(402).json({ error: 'Insufficient credits. Please top up your balance.' });
+    return null;
   }
-};
 
-const proxyVoices = async (req, res) => {
+  let response;
   try {
-    const response = await axios.get(`${FASTAPI_URL}/v1/voices`, {
-      headers: { 'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}` },
-      validateStatus: (status) => true,
-    });
-    
-    if (response.status !== 200) {
-      return res.status(response.status).json(response.data);
-    }
-    
-    res.json(response.data);
-  } catch (error) {
-    console.error('Proxy Voices Error:', error.message);
-    res.status(500).json({ error: 'Failed to communicate with TTS engine' });
-  }
-};
-
-const proxyStudioTTS = async (req, res) => {
-  try {
-    const user = await prisma.user.findUnique({ where: { id: req.userId } });
-    if (!user || user.creditsBalance <= 0) {
-      return res.status(402).json({ error: 'Insufficient credits.' });
-    }
-
-    const response = await axios.post(`${FASTAPI_URL}/v1/tts`, req.body, {
+    response = await axios.post(`${FASTAPI_URL}/v1/tts`, req.body, {
       headers: {
         'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}`,
         'Content-Type': 'application/json',
@@ -298,45 +158,232 @@ const proxyStudioTTS = async (req, res) => {
       responseType: 'stream',
       validateStatus: () => true,
     });
+  } catch (err) {
+    await refundCredits(userId, expectedCredits);
+    console.error(`${endpointType} upstream error:`, err.message);
+    res.status(502).json({ error: 'Failed to reach TTS engine' });
+    return null;
+  }
 
-    if (response.status !== 200) {
-      res.status(response.status);
-      for (const [key, value] of Object.entries(response.headers)) {
-        res.setHeader(key, value);
-      }
-      return response.data.pipe(res);
+  if (response.status !== 200) {
+    await refundCredits(userId, expectedCredits);
+    res.status(response.status);
+    for (const [key, value] of Object.entries(response.headers)) {
+      res.setHeader(key, value);
+    }
+    response.data.pipe(res);
+    return null;
+  }
+
+  // FastAPI reports its own computed billing in headers. We trust our own
+  // computation as the authoritative deduction; we only use FastAPI's headers
+  // for reconciliation (refund the diff if FastAPI saw fewer billable units).
+  const fastapiCredits = parseInt(response.headers['x-credits-deducted'] || '0', 10);
+  const fastapiCharCount = parseInt(response.headers['x-char-count'] || '0', 10);
+  const fastapiEmotion = parseInt(response.headers['x-emotion-tag-count'] || '0', 10);
+  const tone = response.headers['x-tone'] || null;
+
+  let finalCredits = expectedCredits;
+  let finalChars = charCount;
+  let finalEmotion = emotionCount;
+
+  if (fastapiCredits > 0 && fastapiCredits < expectedCredits) {
+    const diff = expectedCredits - fastapiCredits;
+    await refundCredits(userId, diff);
+    finalCredits = fastapiCredits;
+    finalChars = fastapiCharCount || charCount;
+    finalEmotion = fastapiEmotion || emotionCount;
+  }
+
+  await logUsage({
+    userId,
+    apiKeyId,
+    endpointType,
+    charsCount: finalChars,
+    emotionTagsCount: finalEmotion,
+    toneUsed: tone,
+    creditsDeducted: finalCredits,
+  });
+
+  // Re-read the authoritative balance. The reservation already deducted
+  // expectedCredits and the reconciliation above may have refunded the diff,
+  // so a single live read is the simplest source of truth.
+  const fresh = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { creditsBalance: true },
+  });
+  const fallbackBalance = reservation.balance + (expectedCredits - finalCredits);
+  const authoritativeBalance = fresh ? fresh.creditsBalance : fallbackBalance;
+
+  // Forward upstream headers but override x-credits-* with the authoritative
+  // values we computed and persisted.
+  for (const [key, value] of Object.entries(response.headers)) {
+    const lower = key.toLowerCase();
+    if (lower === 'x-credits-remaining' || lower === 'x-credits-deducted') continue;
+    res.setHeader(key, value);
+  }
+  res.setHeader('x-credits-remaining', authoritativeBalance.toString());
+  res.setHeader('x-credits-deducted', finalCredits.toString());
+  res.setHeader('Transfer-Encoding', 'chunked');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Access-Control-Expose-Headers', 'x-credits-remaining, x-credits-deducted, x-char-count, x-emotion-tag-count, x-tone');
+
+  return response;
+};
+
+const proxyTTS = async (req, res) => {
+  try {
+    const response = await performBilledTts({
+      req,
+      res,
+      userId: req.user.id,
+      apiKeyId: req.apiKey ? req.apiKey.id : null,
+      endpointType: 'TTS',
+    });
+    if (!response) return;
+    response.data.pipe(res);
+  } catch (error) {
+    console.error('Proxy TTS Error:', error.message);
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to communicate with TTS engine' });
+  }
+};
+
+const proxySTT = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Audio file is required' });
     }
 
-    const creditsDeducted = parseInt(response.headers['x-credits-deducted'] || '0', 10);
-    const charCount = parseInt(response.headers['x-char-count'] || '0', 10);
-    
-    const deduction = await deductCreditsAndLog({
-      userId: req.userId,
-      endpointType: 'STUDIO_TTS',
-      creditsDeducted,
-      charsCount: charCount,
-    });
-
-    if (!deduction.ok) {
+    // STT cost is duration-based; reserve a generous minimum so the request
+    // can run even before we know the actual duration. We reconcile after.
+    const RESERVE_MIN = 60; // ~30 seconds worth at 2 credits/sec
+    const reservation = await reserveCredits(req.user.id, RESERVE_MIN);
+    if (!reservation.ok) {
       return res.status(402).json({ error: 'Insufficient credits. Please top up your balance.' });
     }
 
-    for (const [key, value] of Object.entries(response.headers)) {
-      // Skip x-credits-remaining from upstream — we set the authoritative value below
-      if (key.toLowerCase() !== 'x-credits-remaining') {
-        res.setHeader(key, value);
+    const FormData = require('form-data');
+    const form = new FormData();
+    form.append('file', req.file.buffer, req.file.originalname);
+
+    let response;
+    try {
+      response = await axios.post(`${FASTAPI_URL}/v1/stt`, form, {
+        headers: {
+          'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}`,
+          ...form.getHeaders(),
+        },
+        validateStatus: () => true,
+      });
+    } catch (err) {
+      await refundCredits(req.user.id, RESERVE_MIN);
+      console.error('STT upstream error:', err.message);
+      return res.status(502).json({ error: 'Failed to reach STT engine' });
+    }
+
+    if (response.status !== 200) {
+      await refundCredits(req.user.id, RESERVE_MIN);
+      return res.status(response.status).json(response.data);
+    }
+
+    const duration = response.data.duration || 0;
+    const actualCredits = computeSttCredits(duration);
+
+    if (actualCredits < RESERVE_MIN) {
+      await refundCredits(req.user.id, RESERVE_MIN - actualCredits);
+    } else if (actualCredits > RESERVE_MIN) {
+      // Need to charge the rest; if the second reservation fails the user got
+      // a small free credit but no overdraft. Acceptable.
+      const extra = actualCredits - RESERVE_MIN;
+      const more = await reserveCredits(req.user.id, extra);
+      if (!more.ok) {
+        console.warn(`STT under-billed by ${extra} credits (user ${req.user.id})`);
       }
     }
-    // Always set the authoritative balance after deduction
-    res.setHeader('x-credits-remaining', deduction.creditsRemaining.toString());
-    res.setHeader('Transfer-Encoding', 'chunked');
-    res.setHeader('Cache-Control', 'no-cache');
-    // Expose billing headers to the browser (required for fetch to read them cross-origin)
-    res.setHeader('Access-Control-Expose-Headers', 'x-credits-remaining, x-credits-deducted, x-char-count, x-emotion-tag-count, x-tone');
-    const audioChunks = [];
-    response.data.on('data', (chunk) => {
-      audioChunks.push(chunk);
+
+    await logUsage({
+      userId: req.user.id,
+      apiKeyId: req.apiKey ? req.apiKey.id : null,
+      endpointType: 'STT',
+      creditsDeducted: actualCredits,
     });
+
+    const fresh = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { creditsBalance: true },
+    });
+
+    res.json({
+      ...response.data,
+      billing: {
+        creditsDeducted: actualCredits,
+        creditsRemaining: fresh ? fresh.creditsBalance : reservation.balance,
+      },
+    });
+  } catch (error) {
+    console.error('Proxy STT Error:', error.message);
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to communicate with STT engine' });
+  }
+};
+
+const proxyVoices = async (req, res) => {
+  try {
+    const response = await axios.get(`${FASTAPI_URL}/v1/voices`, {
+      headers: { 'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}` },
+      validateStatus: () => true,
+    });
+
+    if (response.status !== 200) {
+      return res.status(response.status).json(response.data);
+    }
+
+    res.json(response.data);
+  } catch (error) {
+    console.error('Proxy Voices Error:', error.message);
+    res.status(500).json({ error: 'Failed to communicate with TTS engine' });
+  }
+};
+
+// Atomically swaps the user's lastAudio{Key,Url,Mp3Key,Mp3Url} fields and
+// returns the previous keys so the caller can delete only the objects this
+// request actually displaced. Two concurrent studio requests will not delete
+// each other's freshly-uploaded objects.
+const swapLastAudio = async (userId, { newKey, newUrl, newMp3Key, newMp3Url }) => {
+  return prisma.$transaction(async (tx) => {
+    const current = await tx.user.findUnique({
+      where: { id: userId },
+      select: { lastAudioKey: true, lastAudioMp3Key: true },
+    });
+    await tx.user.update({
+      where: { id: userId },
+      data: {
+        lastAudioKey: newKey,
+        lastAudioUrl: newUrl,
+        lastAudioUpdatedAt: new Date(),
+        lastAudioMp3Key: newMp3Key,
+        lastAudioMp3Url: newMp3Url,
+      },
+    });
+    return {
+      prevWavKey: current ? current.lastAudioKey : null,
+      prevMp3Key: current ? current.lastAudioMp3Key : null,
+    };
+  });
+};
+
+const proxyStudioTTS = async (req, res) => {
+  try {
+    const response = await performBilledTts({
+      req,
+      res,
+      userId: req.userId,
+      apiKeyId: null,
+      endpointType: 'STUDIO_TTS',
+    });
+    if (!response) return;
+
+    const audioChunks = [];
+    response.data.on('data', (chunk) => audioChunks.push(chunk));
 
     response.data.on('end', async () => {
       if (!r2Enabled) return;
@@ -356,22 +403,18 @@ const proxyStudioTTS = async (req, res) => {
           console.warn('MP3 conversion skipped: ffmpeg unavailable.');
         }
 
-        await prisma.user.update({
-          where: { id: req.userId },
-          data: {
-            lastAudioKey: newKey,
-            lastAudioUrl: uploadResult.publicUrl,
-            lastAudioUpdatedAt: new Date(),
-            lastAudioMp3Key: mp3Key,
-            lastAudioMp3Url: mp3Url,
-          },
+        const { prevWavKey, prevMp3Key } = await swapLastAudio(req.userId, {
+          newKey,
+          newUrl: uploadResult.publicUrl,
+          newMp3Key: mp3Key,
+          newMp3Url: mp3Url,
         });
 
-        if (user.lastAudioKey) {
-          await deleteAudioObject(user.lastAudioKey);
+        if (prevWavKey && prevWavKey !== newKey) {
+          await deleteAudioObject(prevWavKey).catch((e) => console.warn('R2 delete failed:', e.message));
         }
-        if (user.lastAudioMp3Key) {
-          await deleteAudioObject(user.lastAudioMp3Key);
+        if (prevMp3Key && prevMp3Key !== mp3Key) {
+          await deleteAudioObject(prevMp3Key).catch((e) => console.warn('R2 delete failed:', e.message));
         }
       } catch (err) {
         console.error('R2 upload error:', err.message);
@@ -381,14 +424,12 @@ const proxyStudioTTS = async (req, res) => {
     response.data.pipe(res);
   } catch (error) {
     console.error('Studio TTS Error:', error.message);
-    res.status(500).json({ error: 'Studio TTS failed' });
+    if (!res.headersSent) res.status(500).json({ error: 'Studio TTS failed' });
   }
 };
 
 const proxyDemoTTS = async (req, res) => {
   try {
-    // Unauthenticated proxy specifically for the landing page demo.
-    // Hardcoded to prevent abuse (only accepts specific demo payload)
     const demoCheck = validateDemoPayload(req.body);
     if (!demoCheck.ok) {
       return res.status(400).json({ error: demoCheck.error });
@@ -415,62 +456,82 @@ const proxyDemoTTS = async (req, res) => {
     response.data.pipe(res);
   } catch (error) {
     console.error('Demo TTS Error:', error.message);
-    res.status(500).json({ error: 'Demo TTS failed' });
+    if (!res.headersSent) res.status(500).json({ error: 'Demo TTS failed' });
   }
 };
 
 const proxyStudioSTT = async (req, res) => {
   try {
-    const user = await prisma.user.findUnique({ where: { id: req.userId } });
-    if (!user || user.creditsBalance <= 0) {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Audio file is required' });
+    }
+
+    const RESERVE_MIN = 60;
+    const reservation = await reserveCredits(req.userId, RESERVE_MIN);
+    if (!reservation.ok) {
       return res.status(402).json({ error: 'Insufficient credits.' });
     }
 
     const FormData = require('form-data');
     const form = new FormData();
-    if (req.file) {
-      form.append('file', req.file.buffer, req.file.originalname);
-    } else {
-      return res.status(400).json({ error: 'Audio file is required' });
+    form.append('file', req.file.buffer, req.file.originalname);
+
+    let response;
+    try {
+      response = await axios.post(`${FASTAPI_URL}/v1/stt`, form, {
+        headers: {
+          'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}`,
+          ...form.getHeaders(),
+        },
+        validateStatus: () => true,
+      });
+    } catch (err) {
+      await refundCredits(req.userId, RESERVE_MIN);
+      console.error('Studio STT upstream error:', err.message);
+      return res.status(502).json({ error: 'Failed to reach STT engine' });
     }
 
-    const response = await axios.post(`${FASTAPI_URL}/v1/stt`, form, {
-      headers: {
-        'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}`,
-        ...form.getHeaders(),
-      },
-      validateStatus: () => true,
-    });
-
     if (response.status !== 200) {
+      await refundCredits(req.userId, RESERVE_MIN);
       return res.status(response.status).json(response.data);
     }
 
+    const duration = response.data.duration || 0;
+    const actualCredits = computeSttCredits(duration);
     const transcribedText = response.data.text || '';
-    const charCount = transcribedText.length;
-    const creditsDeducted = charCount > 0 ? charCount : 0; // 1 credit per character
 
-    const deduction = await deductCreditsAndLog({
+    if (actualCredits < RESERVE_MIN) {
+      await refundCredits(req.userId, RESERVE_MIN - actualCredits);
+    } else if (actualCredits > RESERVE_MIN) {
+      const extra = actualCredits - RESERVE_MIN;
+      const more = await reserveCredits(req.userId, extra);
+      if (!more.ok) {
+        console.warn(`Studio STT under-billed by ${extra} credits (user ${req.userId})`);
+      }
+    }
+
+    await logUsage({
       userId: req.userId,
       endpointType: 'STUDIO_STT',
-      creditsDeducted,
-      charsCount: charCount,
+      charsCount: transcribedText.length,
+      creditsDeducted: actualCredits,
     });
 
-    if (!deduction.ok) {
-      return res.status(402).json({ error: 'Insufficient credits.' });
-    }
+    const fresh = await prisma.user.findUnique({
+      where: { id: req.userId },
+      select: { creditsBalance: true },
+    });
 
     res.json({
       ...response.data,
       billing: {
-        creditsDeducted,
-        creditsRemaining: deduction.creditsRemaining
-      }
+        creditsDeducted: actualCredits,
+        creditsRemaining: fresh ? fresh.creditsBalance : reservation.balance,
+      },
     });
   } catch (error) {
     console.error('Studio STT Error:', error.message);
-    res.status(500).json({ error: 'Studio STT failed' });
+    if (!res.headersSent) res.status(500).json({ error: 'Studio STT failed' });
   }
 };
 

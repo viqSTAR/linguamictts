@@ -3,7 +3,7 @@ services:
     name: linguamic-backend
     runtime: node
     plan: free
-    buildCommand: npm install
+    buildCommand: npm install && npx prisma migrate deploy
     startCommand: node src/index.js
     healthCheckPath: /health
     envVars:

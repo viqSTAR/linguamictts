@@ -1,16 +1,15 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 import io
 import re
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timezone
 
 import os
 import gguf_orpheus as _gguf_orpheus_module
 from gguf_orpheus import generate_speech_from_api, AVAILABLE_VOICES, SAMPLE_RATE
-from fastapi import UploadFile, File
 import tempfile
 
 # ---------------- STT GLOBALS ---------------- #
@@ -34,6 +33,31 @@ print(f"[LM Studio] API_URL set to: {_gguf_orpheus_module.API_URL}")
 
 
 app = FastAPI()
+
+# ---------------- AUTH ---------------- #
+# Internal shared-secret auth so this service can't be hit directly. The
+# Express proxy sends `Authorization: Bearer <FASTAPI_INTERNAL_KEY>` on every
+# upstream call. Without this, anyone who can reach the FastAPI URL (ngrok,
+# RunPod public endpoint, etc.) could bypass credit deduction entirely.
+# Falls back to the older VOICEFORGE_API_KEY name so existing .env files keep
+# working without edits.
+FASTAPI_INTERNAL_KEY = (
+    os.getenv("FASTAPI_INTERNAL_KEY")
+    or os.getenv("VOICEFORGE_API_KEY")
+    or "default_dev_key"
+)
+
+
+def require_internal_key(authorization: Optional[str] = Header(None)):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(401, "Missing or invalid Authorization header")
+    provided = authorization.split(None, 1)[1].strip()
+    # Constant-time comparison to avoid timing side channels.
+    import hmac
+    if not hmac.compare_digest(provided, FASTAPI_INTERNAL_KEY):
+        raise HTTPException(401, "Invalid internal key")
+    return True
+
 
 # ---------------- CONFIG ---------------- #
 
@@ -113,13 +137,14 @@ def sanitize_emotion_tags(text: str) -> str:
 
 
 class TTSRequest(BaseModel):
-    text: str
+    text: str = Field(..., min_length=1, max_length=50000)
     voice: Optional[str] = "tara"
     tone: Optional[str] = None
-    temperature: Optional[float] = None
-    top_p: Optional[float] = None
-    repetition_penalty: Optional[float] = None
-    speed: Optional[float] = None
+    # Pydantic enforces bounds; tampered/garbage values are rejected with 422.
+    temperature: Optional[float] = Field(None, ge=0.0, le=1.5)
+    top_p: Optional[float] = Field(None, ge=0.0, le=1.0)
+    repetition_penalty: Optional[float] = Field(None, ge=1.0, le=2.0)
+    speed: Optional[float] = Field(None, ge=0.5, le=2.0)
 
 
 def split_text(text, max_chars=300):
@@ -315,8 +340,13 @@ def generate_tts_stream(text, voice, temp, top_p, rep_pen, speed):
 
 # ---------------- API ---------------- #
 
+@app.get("/v1/voices")
+def list_voices(_auth: bool = Depends(require_internal_key)):
+    return {"voices": list(AVAILABLE_VOICES), "tones": list(TONE_PRESETS.keys())}
+
+
 @app.post("/v1/tts")
-def tts(req: TTSRequest):
+def tts(req: TTSRequest, _auth: bool = Depends(require_internal_key)):
 
     if not req.text.strip():
         raise HTTPException(400, "Empty text")
@@ -335,10 +365,12 @@ def tts(req: TTSRequest):
 
     tone = TONE_PRESETS.get(req.tone, {})
 
-    temperature = req.temperature or tone.get("temperature", DEFAULT_TEMPERATURE)
-    top_p       = req.top_p        or tone.get("top_p",        DEFAULT_TOP_P)
-    rep_pen     = req.repetition_penalty or tone.get("repetition_penalty", DEFAULT_REP_PENALTY)
-    speed       = req.speed        or tone.get("speed",        1.0)
+    # Explicit None checks — `or` would treat a legitimate 0.0 as falsy and
+    # silently swap in the default. That matters for temperature in particular.
+    temperature = req.temperature if req.temperature is not None else tone.get("temperature", DEFAULT_TEMPERATURE)
+    top_p       = req.top_p        if req.top_p        is not None else tone.get("top_p",        DEFAULT_TOP_P)
+    rep_pen     = req.repetition_penalty if req.repetition_penalty is not None else tone.get("repetition_penalty", DEFAULT_REP_PENALTY)
+    speed       = req.speed        if req.speed        is not None else tone.get("speed",        1.0)
 
     # ---------------- EMOTION TAGS ---------------- #
     # Count only VALID emotion tags in the sanitized text.
@@ -370,7 +402,7 @@ def tts(req: TTSRequest):
         ),
         media_type="audio/wav",
         headers={
-            "Content-Disposition": f"attachment; filename=voice_{datetime.utcnow().timestamp()}.wav",
+            "Content-Disposition": f"attachment; filename=voice_{datetime.now(timezone.utc).timestamp()}.wav",
             "Transfer-Encoding": "chunked",
             "Cache-Control": "no-cache",
             # Billing headers — read by Express proxy to deduct user credits
@@ -381,16 +413,27 @@ def tts(req: TTSRequest):
         }
     )
 
+# 25 MiB matches the Express multer cap; anything bigger would have been
+# rejected upstream. Belt-and-braces in case this is hit directly.
+_MAX_STT_BYTES = 25 * 1024 * 1024
+
+
 @app.post("/v1/stt")
-async def stt(file: UploadFile = File(...)):
+async def stt(file: UploadFile = File(...), _auth: bool = Depends(require_internal_key)):
     if whisper_model is None:
         raise HTTPException(500, "STT model not loaded")
 
     if not file:
         raise HTTPException(400, "No file uploaded")
 
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(400, "Empty audio file")
+    if len(contents) > _MAX_STT_BYTES:
+        raise HTTPException(413, f"Audio file too large. Max {_MAX_STT_BYTES // (1024 * 1024)}MB.")
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-        tmp.write(await file.read())
+        tmp.write(contents)
         tmp_path = tmp.name
 
     try:
@@ -398,4 +441,7 @@ async def stt(file: UploadFile = File(...)):
         text = " ".join([segment.text for segment in segments])
         return {"text": text.strip(), "duration": info.duration}
     finally:
-        os.unlink(tmp_path)
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass

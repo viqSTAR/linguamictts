@@ -371,11 +371,16 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
     nextPlayTimeRef.current = context.currentTime + 0.1;
 
     try {
+      // Frontend dropdown label "jessi" maps to the canonical Orpheus voice "jess".
       const resolvedVoice = voice === 'jessi' ? 'jess' : voice;
       const payload: Record<string, unknown> = { text, voice: resolvedVoice };
       if (tone) payload.tone = tone;
       if (!tone && speed !== 1.0) payload.speed = speed;
-      if (temperature !== 0.35) payload.temperature = temperature;
+      // Always send the temperature the slider is on so the studio matches
+      // what's shown in the UI. The old `!== 0.35` skip was a stale magic
+      // number that didn't match the API's default (0.55), so the studio
+      // silently rendered with a different temperature than the slider.
+      payload.temperature = temperature;
 
       const token = localStorage.getItem('token') || '';
       const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
@@ -397,7 +402,13 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
       if (remainingCredits) {
         setUser((prev) => (prev ? { ...prev, creditsBalance: parseInt(remainingCredits, 10) } : prev));
       } else {
-        setUser((prev) => (prev ? { ...prev, creditsBalance: Math.max(0, (prev.creditsBalance ?? 0) - text.length) } : prev));
+        // Optimistic fallback when the header is unavailable (CORS quirk etc).
+        // Mirror the backend formula: 1 credit/char + 5 credits per valid emotion tag.
+        const VALID_EMOTIONS = new Set(['laugh', 'chuckle', 'sigh', 'cough', 'sniffle', 'groan', 'yawn', 'gasp']);
+        const matches = text.match(/<(\w+)>/g) || [];
+        const validEmotions = matches.filter((m) => VALID_EMOTIONS.has(m.slice(1, -1).toLowerCase())).length;
+        const cost = text.length + validEmotions * 5;
+        setUser((prev) => (prev ? { ...prev, creditsBalance: Math.max(0, (prev.creditsBalance ?? 0) - cost) } : prev));
       }
 
       if (!response.body) throw new Error("ReadableStream not supported");

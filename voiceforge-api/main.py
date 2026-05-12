@@ -32,6 +32,38 @@ _gguf_orpheus_module.API_URL = f"http://{_lm_host}:{_lm_port}/v1/completions"
 print(f"[LM Studio] API_URL set to: {_gguf_orpheus_module.API_URL}")
 
 
+def _patched_format_prompt(prompt, voice=_gguf_orpheus_module.DEFAULT_VOICE):
+    """Corrected Orpheus prompt format with the full audio-start primer.
+
+    The upstream isaiahbjork/orpheus-tts-local format wraps the input as
+    "<|audio|>{voice}: {text}<|eot_id|>", which omits THREE tokens that
+    canopyai's reference engine_class.py appends after <|eot_id|>:
+
+        128260 = <custom_token_4>
+        128261 = <custom_token_5>
+        128257 = <custom_token_1>
+
+    These three tokens are the audio-generation primer — they tell the
+    model "now emit audio tokens, not text." Without them, the model has
+    to "decide" how to begin generation, which manifests as:
+      • garbage / hallucinated syllables before the first real word
+      • unstable first-word pronunciation (esp. on unfamiliar tokens)
+      • occasional emotion-tag misfires (no priming = no stable state)
+    Adding them brings the gguf-via-LM-Studio path in line with canopyai's
+    own reference implementation.
+    """
+    if voice not in _gguf_orpheus_module.AVAILABLE_VOICES:
+        voice = _gguf_orpheus_module.DEFAULT_VOICE
+    return (
+        f"<|audio|>{voice}: {prompt}<|eot_id|>"
+        f"<custom_token_4><custom_token_5><custom_token_1>"
+    )
+
+
+_gguf_orpheus_module.format_prompt = _patched_format_prompt
+print("[prompt] Patched gguf_orpheus.format_prompt with canopy audio-primer tokens")
+
+
 app = FastAPI()
 
 # ---------------- AUTH ---------------- #
@@ -61,13 +93,26 @@ def require_internal_key(authorization: Optional[str] = Header(None)):
 
 # ---------------- CONFIG ---------------- #
 
-# Neutral defaults — balanced for natural, conversational speech
-# Lower rep_penalty (1.10 = official Orpheus minimum) — higher values make the
-# model speak faster which causes word-skipping (e.g. "language" in "language barriers")
+# Production defaults — Lex-au/Orpheus-FastAPI validated values, slightly
+# tuned down on temperature for steadier prosody (Canopy's "stable" range
+# is 0.3-0.6; we sit at 0.55 to suppress mid-sentence word-merging where
+# the model occasionally rushes adjacent words like "believe communication").
+#
+# Why these specific numbers:
+#   temperature 0.55 — inside Canopy's stable band, just below Lex-au's 0.60.
+#     Trade-off: marginally less prosodic variation in exchange for fewer
+#     run-together word pairs and more consistent emotion rendering.
+#   top_p 0.90 — Lex-au default. Above 0.95 the model produces stutters and
+#     skipped phonemes on long sentences.
+#   repetition_penalty 1.10 — Canopy's documented MINIMUM for stable
+#     generation. Anything higher makes the model speak faster, which is the
+#     dominant cause of word-skipping in long chunks.
 DEFAULT_TEMPERATURE = 0.55
-DEFAULT_TOP_P = 0.90
-# 1.10 is the minimum required for stable generation per official Orpheus docs.
-# Raising above this makes speech faster but also causes word-skipping on longer sentences.
+# top_p 0.85 (was 0.90) — Canopy's stable band is 0.6-0.9. At 0.90 the model
+# occasionally drops words mid-list ("built for creators" → "built profess…")
+# and lets emotion-token sampling drift (laugh → yawn). 0.85 keeps prosodic
+# variation while pulling the nucleus tighter.
+DEFAULT_TOP_P = 0.85
 DEFAULT_REP_PENALTY = 1.10
 
 # Tone presets — each tone has a distinct enough parameter spread so they
@@ -112,6 +157,42 @@ VALID_ORPHEUS_EMOTIONS = frozenset([
 _EMOTION_TAG_RE = re.compile(r'<(\w+)>')
 
 
+# Detect a lowercase→uppercase boundary inside a word (LinguaMic, VoiceForge)
+# OR an uppercase→uppercase-then-lowercase boundary (AIPowered, XMLParser).
+# Combined they cover all canonical CamelCase / PascalCase forms.
+_CAMEL_ACRONYM_RE = re.compile(r'([A-Z])([A-Z][a-z])')
+_CAMEL_LOWER_UPPER_RE = re.compile(r'([a-z])([A-Z])')
+
+
+def split_camelcase_words(text: str) -> str:
+    """Insert a space between CamelCase word parts so the TTS pronounces
+    brand-style names correctly. Examples:
+
+        LinguaMic       -> Lingua Mic
+        ParaDox         -> Para Dox
+        SinChan         -> Sin Chan
+        VoiceForge      -> Voice Forge
+        AIPowered       -> AI Powered    (acronym + word)
+        XMLParser       -> XML Parser
+
+    Emotion tags (<laugh>, <cough>, …) are passed through untouched —
+    splitting them would break the special-token vocab. Billing in the
+    /v1/tts handler stays on the ORIGINAL request text so users aren't
+    charged for the auto-inserted spaces.
+    """
+    parts = re.split(r'(<\w+>)', text)
+    for i, part in enumerate(parts):
+        if part.startswith('<') and part.endswith('>'):
+            continue  # leave emotion tags as-is
+        # First the acronym→word boundary (so AIPowered -> AI Powered before
+        # the lowercase rule pulls a single letter off the front).
+        part = _CAMEL_ACRONYM_RE.sub(r'\1 \2', part)
+        # Then the lowercase→uppercase boundary (LinguaMic -> Lingua Mic).
+        part = _CAMEL_LOWER_UPPER_RE.sub(r'\1 \2', part)
+        parts[i] = part
+    return ''.join(parts)
+
+
 def sanitize_emotion_tags(text: str) -> str:
     """Strip any emotion-style tags that are NOT in the official Orpheus vocab.
 
@@ -150,26 +231,25 @@ class TTSRequest(BaseModel):
 def split_text(text, max_chars=300):
     """Split text into chunks at natural sentence boundaries.
 
-    Why this matters for TTS quality:
-    - Splitting mid-sentence and adding a trailing comma makes Orpheus pause unnaturally
-      at the chunk boundary, even though no pause exists in the original text.
-    - Emotion tags work best when they have full sentence context on both sides.
-      Mid-chunk emotion tags or emotion tags at the very end of a chunk misfire.
-    - Complete sentences give the model coherent semantic context, which prevents
-      speed jitter and the repetition bug (model loses its place in fragments).
+    CRITICAL: emotion tags MUST stay inline with their surrounding sentence.
+    Orpheus was trained with inline tags ("That was funny <laugh> truly"),
+    so an isolated `<laugh>` chunk has no semantic context — the model's
+    sampler ends up producing whichever non-verbal sound it lands on
+    (gasp / cough / sigh) instead of a laugh. Keeping tags inline gives
+    the model the surrounding words as cues so the right emotion renders.
 
     Strategy:
-    1. Split at real sentence endings: . ? ! followed by whitespace
-    2. If a sentence is still very long (>max_chars), split at comma boundaries
-    3. NEVER add artificial trailing punctuation — the model inserts pauses there
+    1. Split at real sentence endings: . ? ! followed by whitespace.
+    2. If a sentence is still very long (>max_chars), split at comma boundaries,
+       and KEEP emotion tags attached to whichever clause they sit in.
+    3. NEVER add artificial trailing punctuation — the model treats it as
+       a pause cue.
     """
     # Clean whitespace
     text = re.sub(r'\s+', ' ', text).strip()
 
-    # Step 1: split at real sentence boundaries (. ? ! followed by space or end-of-string)
+    # Step 1: split at real sentence boundaries (. ? ! followed by space)
     raw_sentences = re.split(r'(?<=[.?!])\s+', text)
-
-
 
     chunks = []
     for sentence in raw_sentences:
@@ -177,51 +257,66 @@ def split_text(text, max_chars=300):
         if not sentence:
             continue
 
-        if len(sentence) <= max_chars:
-            # Whole sentence fits — keep it intact for smooth, natural delivery
-            chunks.append(sentence)
-        else:
-            # Step 2: long sentence — split at comma boundaries
-            # Keeps emotion tags attached to the clause they precede
-            parts = re.split(r',\s+', sentence)
-            current = ''
-            for part in parts:
-                candidate = (current + ', ' + part) if current else part
-                if current and len(candidate) > max_chars:
-                    chunks.append(current)
-                    current = part
+        # ─── Sentence-leading emotion tag ────────────────────────────────────
+        # Orpheus emotion tags render most fully when placed MID-SENTENCE with
+        # words on both sides — that's the canonical training pattern
+        # ("...that's interesting <laugh> I hadn't thought of that..."). When
+        # a user writes "<laugh> Our mission..." we slide the tag forward to
+        # the first natural break inside that sentence, so it ends up between
+        # clauses rather than as vocal punctuation at a sentence boundary
+        # (boundary tags render as a clipped gasp/cough-length sound).
+        #
+        # Strategy:
+        #   1. If a comma exists within the first ~50 chars, slide the tag
+        #      just before that comma — natural mid-clause position.
+        #   2. Otherwise slide the tag past the first 2 words.
+        #   3. If the sentence is too short to do either, keep the tag at
+        #      the start and let _generate_chunk's emotion-aware sampling
+        #      handle it.
+        while True:
+            m = re.match(r'^\s*(<\w+>)\s+(.+)$', sentence, re.DOTALL)
+            if not m:
+                break
+            tag, body = m.group(1), m.group(2).strip()
+            comma_pos = body.find(',')
+            if 0 < comma_pos < 50:
+                sentence = f"{body[:comma_pos]} {tag}{body[comma_pos:]}"
+            else:
+                parts = body.split(' ', 2)
+                if len(parts) >= 3:
+                    sentence = f"{parts[0]} {parts[1]} {tag} {parts[2]}"
                 else:
-                    current = candidate
-            if current.strip():
-                chunks.append(current.strip())
+                    # Too short to reposition — keep as-is, accept reduced
+                    # emotion expression.
+                    sentence = f"{tag} {body}"
+                    break
+            # One pass per leading tag; loop in case of stacked tags.
 
-    # Step 3: isolate each emotion tag as its own dedicated chunk.
-    # The user wants '<laugh>' to produce ONE consistent laugh sound every time.
-    # If the emotion is buried in a 150-char sentence, the model's state at that
-    # point in generation affects how it sounds — unpredictable and inconsistent.
-    # Solution: re.split with a capturing group keeps the tags as list elements,
-    # giving each emotion its own dedicated generation call with fixed settings.
-    isolated: list[str] = []
-    for chunk in chunks:
-        parts = re.split(r'(<\w+>)', chunk)   # capturing group keeps the tag
+        # Handle the case where the entire input begins with a bare tag and
+        # there's nothing after it.
+        m_only = re.fullmatch(r'\s*(<\w+>)\s*', sentence)
+        if m_only:
+            chunks.append(m_only.group(1))
+            continue
+
+        if len(sentence) <= max_chars:
+            chunks.append(sentence)
+            continue
+
+        # Step 2: long sentence — split at comma boundaries, keeping tags inline.
+        parts = re.split(r',\s+', sentence)
+        current = ''
         for part in parts:
-            part = part.strip()
-            if part:
-                isolated.append(part)
+            candidate = (current + ', ' + part) if current else part
+            if current and len(candidate) > max_chars:
+                chunks.append(current)
+                current = part
+            else:
+                current = candidate
+        if current.strip():
+            chunks.append(current.strip())
 
-    # Step 4: merge very short NON-emotion fragments (< 30 chars) with neighbours.
-    # Emotion chunks are NEVER merged — they must stay isolated.
-    MIN_CHARS = 30
-    merged: list[str] = []
-    for chunk in isolated:
-        is_emotion = bool(re.fullmatch(r'<\w+>', chunk))
-        prev_is_emotion = bool(merged and re.fullmatch(r'<\w+>', merged[-1]))
-        if not is_emotion and not prev_is_emotion and merged and len(chunk) < MIN_CHARS:
-            merged[-1] = merged[-1] + ' ' + chunk
-        else:
-            merged.append(chunk)
-
-    return [c for c in merged if c.strip()]
+    return [c for c in chunks if c.strip()]
 
 
 
@@ -280,7 +375,6 @@ def generate_tts_stream(text, voice, temp, top_p, rep_pen, speed):
     chunks = split_text(text)
 
     import struct
-    import concurrent.futures
 
     def create_wav_header(sample_rate=SAMPLE_RATE, channels=1, sampwidth=2):
         header = b"RIFF\xff\xff\xff\xffWAVEfmt \x10\x00\x00\x00\x01\x00"
@@ -297,31 +391,59 @@ def generate_tts_stream(text, voice, temp, top_p, rep_pen, speed):
     def _generate_chunk(chunk: str) -> bytes:
         """Generate and speed-adjust PCM for a single text chunk.
 
-        Emotion-only chunks (e.g. '<laugh>') get dedicated fixed settings so the
-        same emotion tag always produces the same sound, regardless of the active
-        tone or surrounding text.
+        Three regimes:
+          • bare emotion tag (no surrounding text) — extremely rare, only when
+            the user submits literally just '<laugh>'. Use low-randomness
+            sampling so the tag renders as its canonical sound.
+          • sentence containing an emotion tag — clamp temperature so the
+            inline emotion stays consistent. The model already has semantic
+            context from the surrounding words.
+          • plain text — pass through whatever tone/user settings asked for.
+
+        max_tokens scales generously with chunk length (chunk_len * 30 + 1500
+        floor) so generation NEVER truncates mid-word — that's the main cause
+        of perceived word-skipping at chunk tails.
         """
-        is_emotion_only = bool(re.fullmatch(r'<\w+>', chunk.strip()))
+        chunk_stripped = chunk.strip()
+        is_emotion_only = bool(re.fullmatch(r'<\w+>', chunk_stripped))
+        has_emotion = bool(re.search(r'<\w+>', chunk_stripped))
 
         if is_emotion_only:
-            # Fixed settings for deterministic, consistent emotion sounds.
-            # max_tokens 250 = enough for ~0.9s of audio (a short laugh/cough/gasp).
-            # temp 0.65 = slightly expressive so the sound feels natural, not robotic.
-            eff_max_tokens = 250
-            eff_temp = 0.65
+            # Bare tag — tightest sampling bounds so the tag renders as its
+            # canonical sound (laugh = laugh, not gasp/yawn).
+            eff_max_tokens = 400
+            eff_temp = 0.40
+            eff_top_p = 0.70
             eff_rep = 1.10
-            eff_speed = 1.0 # Force neutral speed so emotions are not affected by tones
-        else:
-            eff_max_tokens = min(max(1200, len(chunk) * 22), 8000)
-            eff_temp = temp
+            eff_speed = 1.0
+        elif has_emotion:
+            # Inline emotion — pull BOTH temperature and top_p down hard.
+            # Without this, the emotion-token slot samples freely and the
+            # result drifts to whichever non-verbal sound the model lands on
+            # (laugh → yawn is the common drift). 0.45/0.80 gives the inline
+            # emotion enough variation to feel natural while keeping the
+            # specific emotion type locked in.
+            eff_max_tokens = min(max(1500, len(chunk) * 30), 8000)
+            eff_temp = min(temp, 0.45)
+            eff_top_p = min(top_p, 0.80)
             eff_rep = rep_pen
+            eff_speed = speed
+        else:
+            # Plain text — generous token budget prevents truncation
+            # (the primary cause of "skipped" or "merged" words at the tail
+            # of long chunks). rep_pen stays at the user-supplied value, but
+            # never goes below 1.10 (Orpheus stability floor).
+            eff_max_tokens = min(max(1500, len(chunk) * 30), 8000)
+            eff_temp = temp
+            eff_top_p = top_p
+            eff_rep = max(rep_pen, 1.10)
             eff_speed = speed
 
         audio = generate_speech_from_api(
             prompt=chunk,
             voice=voice,
             temperature=eff_temp,
-            top_p=top_p,
+            top_p=eff_top_p,
             repetition_penalty=eff_rep,
             max_tokens=eff_max_tokens,
         )
@@ -340,9 +462,34 @@ def generate_tts_stream(text, voice, temp, top_p, rep_pen, speed):
 
 # ---------------- API ---------------- #
 
+# Per-voice expressiveness profile. "expressive=True" means the voice was
+# trained with enough emotional variety that emotion tags render reliably;
+# False voices may underplay or mis-render some tags (e.g. <gasp> on Zac
+# can come out as a quiet exhale). Surface this in /v1/voices so the
+# frontend / API consumers can pick a suitable voice for emotional content.
+VOICE_PROFILES = {
+    "tara":  {"expressive": True,  "note": "Most expressive — best for emotional content"},
+    "jess":  {"expressive": True,  "note": "Warm, expressive — great for storytelling"},
+    "leah":  {"expressive": True,  "note": "Gentle, expressive — natural emotion rendering"},
+    "leo":   {"expressive": True,  "note": "Confident, moderately expressive"},
+    "mia":   {"expressive": True,  "note": "Bright, expressive — good for upbeat content"},
+    "zoe":   {"expressive": False, "note": "Cool, less emotive — emotions may render subtly"},
+    "dan":   {"expressive": False, "note": "Steady — best for narration; emotions render weakly"},
+    "zac":   {"expressive": False, "note": "Deep, stoic — emotions may render weakly"},
+}
+
+
 @app.get("/v1/voices")
 def list_voices(_auth: bool = Depends(require_internal_key)):
-    return {"voices": list(AVAILABLE_VOICES), "tones": list(TONE_PRESETS.keys())}
+    voices_with_meta = [
+        {"id": v, **VOICE_PROFILES.get(v, {"expressive": True, "note": ""})}
+        for v in AVAILABLE_VOICES
+    ]
+    return {
+        "voices": voices_with_meta,
+        "tones": list(TONE_PRESETS.keys()),
+        "emotions": list(VALID_ORPHEUS_EMOTIONS),
+    }
 
 
 @app.post("/v1/tts")
@@ -360,6 +507,12 @@ def tts(req: TTSRequest, _auth: bool = Depends(require_internal_key)):
     # generates correctly.
     clean_text = sanitize_emotion_tags(req.text)
 
+    # Auto-split CamelCase brand names so the TTS pronounces them correctly:
+    # "LinguaMic" → "Lingua Mic", "VoiceForge" → "Voice Forge". Billing below
+    # uses the ORIGINAL req.text length so users aren't charged for the
+    # auto-inserted spaces.
+    clean_text = split_camelcase_words(clean_text)
+
     if not clean_text.strip():
         raise HTTPException(400, "Text is empty after removing invalid emotion tags")
 
@@ -374,17 +527,16 @@ def tts(req: TTSRequest, _auth: bool = Depends(require_internal_key)):
 
     # ---------------- EMOTION TAGS ---------------- #
     # Count only VALID emotion tags in the sanitized text.
-    # Using _EMOTION_TAG_RE + VALID_ORPHEUS_EMOTIONS to be consistent.
     valid_emotion_matches = [
         m for m in _EMOTION_TAG_RE.finditer(clean_text)
         if m.group(1).lower() in VALID_ORPHEUS_EMOTIONS
     ]
     emotion_tag_count = len(valid_emotion_matches)
 
-    if emotion_tag_count > 0 and req.temperature is None:
-        # +0.05 boost — gives the model more expressive freedom for emotions
-        # without causing instability (was 0.08, lowered for consistency)
-        temperature = min(temperature + 0.05, 0.92)
+    # Note: we deliberately DO NOT boost temperature when emotions are present.
+    # Higher temperature with emotion tags causes the model to sample drift
+    # across non-verbal tokens (laugh -> gasp/cough). _generate_chunk further
+    # caps the temperature for emotion-bearing chunks to keep them consistent.
 
     # ---------------- BILLING CALCULATION ---------------- #
     char_count = len(req.text)   # bill on original text length (user typed it)

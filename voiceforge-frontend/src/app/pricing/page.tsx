@@ -120,6 +120,11 @@ export default function Pricing() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentPlan, setCurrentPlan] = useState<string>('');
   const [modal, setModal] = useState<ModalState>(defaultModal);
+  // When the backend has Dodo Payments configured (DODO_ENABLED=true), we
+  // skip the mock card/UPI form and redirect to Dodo's hosted checkout.
+  // The /billing/plans endpoint reports this so the UI knows which mode to
+  // render — no separate frontend env var needed.
+  const [dodoEnabled, setDodoEnabled] = useState(false);
 
   // Holds latest form values from PaymentFormMock without causing re-renders
   const formValuesRef = React.useRef<{ tab: 'card' | 'upi'; cardNumber: string; upiId: string }>({
@@ -143,6 +148,11 @@ export default function Pricing() {
         .then(d => { if (d.user?.plan) setCurrentPlan(d.user.plan); })
         .catch(() => {});
     }
+    // /billing/plans is public — tells us whether Dodo is wired up.
+    fetch((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000') + '/billing/plans')
+      .then(r => r.json())
+      .then(d => { if (typeof d.dodoEnabled === 'boolean') setDodoEnabled(d.dodoEnabled); })
+      .catch(() => {});
   }, []);
 
   const openTopUp = (amountUSD: number, credits: number) => {
@@ -166,9 +176,39 @@ export default function Pricing() {
     setModal(defaultModal);
   };
 
+  // Redirects the browser to a Dodo-hosted checkout. Credit/plan grants
+  // happen on Dodo's webhook, not in this flow — when the user returns we
+  // poll /auth/me on /billing/return to surface the new balance.
+  const redirectToDodo = async (payload: { kind: 'topup'; amountUSD: number } | { kind: 'plan'; plan: string }) => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    setModal(p => ({ ...p, step: 'processing' }));
+    try {
+      const res = await fetch((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000') + '/billing/dodo/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (res.ok && data.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
+        return;
+      }
+      alert(`Error: ${data.error || 'Failed to start checkout'}`);
+      setModal(defaultModal);
+    } catch {
+      alert('Network error while starting checkout.');
+      setModal(defaultModal);
+    }
+  };
+
   const processTopUp = async () => {
     const token = localStorage.getItem('token');
     if (!token) return;
+    if (dodoEnabled) {
+      await redirectToDodo({ kind: 'topup', amountUSD: modal.amountUSD });
+      return;
+    }
     if (!validatePaymentForm()) {
       alert('❌ Invalid payment details.\n\nPlease use the test credentials provided to you.');
       return;
@@ -197,6 +237,10 @@ export default function Pricing() {
   const processPlanUpgrade = async () => {
     const token = localStorage.getItem('token');
     if (!token) return;
+    if (dodoEnabled) {
+      await redirectToDodo({ kind: 'plan', plan: modal.planKey });
+      return;
+    }
     if (!validatePaymentForm()) {
       alert('❌ Invalid payment details.\n\nPlease use the test credentials provided to you.');
       return;
@@ -406,8 +450,21 @@ export default function Pricing() {
                       </div>
                     </div>
 
-                    {/* Dummy Payment Form — tabbed */}
-                    <PaymentFormMock onFormChange={(vals) => { formValuesRef.current = vals; }} />
+                    {/* Dodo mode: skip the mock form, show a redirect notice.
+                        Dummy mode: keep the existing card/UPI tabs. */}
+                    {dodoEnabled ? (
+                      <div className="text-left mb-6 p-4 bg-neutral-50 border border-neutral-200 rounded-2xl">
+                        <p className="text-sm text-neutral-700 mb-2 font-medium">Secure checkout by Dodo Payments</p>
+                        <p className="text-xs text-neutral-500 leading-relaxed">
+                          You&apos;ll be redirected to a hosted checkout page to complete payment.
+                          {modal.mode === 'plan'
+                            ? ' Your plan will activate and credits will appear after payment is confirmed.'
+                            : ' Credits will appear in your account once payment is confirmed.'}
+                        </p>
+                      </div>
+                    ) : (
+                      <PaymentFormMock onFormChange={(vals) => { formValuesRef.current = vals; }} />
+                    )}
 
                     <div className="flex justify-between items-center pt-4 border-t border-black/5 mb-6">
                       <span className="text-neutral-900 font-semibold">
@@ -422,11 +479,14 @@ export default function Pricing() {
                       onClick={modal.mode === 'plan' ? processPlanUpgrade : processTopUp}
                       className="w-full bg-black text-white h-14 rounded-2xl font-semibold shadow-[0_8px_20px_rgba(0,0,0,0.15)] hover:bg-neutral-800 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
                     >
-                      {modal.mode === 'plan' ? `Upgrade to ${modal.planName}` : `Pay $${modal.amountUSD.toFixed(2)}`}
+                      {dodoEnabled
+                        ? 'Continue to secure checkout'
+                        : modal.mode === 'plan' ? `Upgrade to ${modal.planName}` : `Pay $${modal.amountUSD.toFixed(2)}`}
                       <ArrowRight className="w-4 h-4" />
                     </button>
                     <p className="text-xs text-neutral-400 mt-4 flex items-center gap-1 justify-center">
-                      <Sparkles className="w-3 h-3" /> Dummy payment mode active
+                      <Sparkles className="w-3 h-3" />
+                      {dodoEnabled ? 'Powered by Dodo Payments' : 'Dummy payment mode active'}
                     </p>
                   </>
                 )}
@@ -442,7 +502,9 @@ export default function Pricing() {
                     <h2 className="text-xl font-bold text-neutral-900 mb-2">
                       {modal.mode === 'plan' ? 'Upgrading Plan...' : 'Processing Payment'}
                     </h2>
-                    <p className="text-neutral-500 animate-pulse">Contacting dummy bank...</p>
+                    <p className="text-neutral-500 animate-pulse">
+                      {dodoEnabled ? 'Opening secure checkout...' : 'Contacting dummy bank...'}
+                    </p>
                   </div>
                 )}
 

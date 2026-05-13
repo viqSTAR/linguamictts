@@ -49,6 +49,17 @@ app.use(cors({
   credentials: true,
 }));
 
+// ── Dodo webhook (RAW BODY — mount BEFORE express.json) ──────────────────────
+// HMAC signature verification requires the exact bytes Dodo sent. If
+// express.json runs first the signature will never match. Limited to 1MB
+// since Dodo events can be larger than our normal API payloads.
+const { handleDodoWebhook } = require('./controllers/billing.controller');
+app.post(
+  '/billing/webhook',
+  express.raw({ type: '*/*', limit: '1mb' }),
+  handleDodoWebhook,
+);
+
 // ── Body parsing ──────────────────────────────────────────────────────────────
 // TTS text bodies are small; cap at 256kb to bound the abuse surface.
 app.use(express.json({ limit: '256kb' }));

@@ -23,6 +23,35 @@ services:
         sync: false
       - key: STRIPE_SECRET_KEY
         sync: false
+      # ── Dodo Payments ─────────────────────────────────────────────────────
+      # DODO_ENABLED gates the live integration. When unset/false, the legacy
+      # dummy top-up + plan upgrade paths stay active (no real charges).
+      - key: DODO_ENABLED
+        sync: false
+      - key: DODO_API_KEY
+        sync: false
+      - key: DODO_WEBHOOK_SECRET
+        sync: false
+      # test_mode | live_mode — defaults to test_mode if unset.
+      - key: DODO_ENV
+        sync: false
+      # FRONTEND_URL is the base used for return_url after checkout.
+      - key: DODO_PRODUCT_STARTER
+        sync: false
+      - key: DODO_PRODUCT_CREATOR
+        sync: false
+      - key: DODO_PRODUCT_PRO
+        sync: false
+      - key: DODO_PRODUCT_TOPUP_1
+        sync: false
+      - key: DODO_PRODUCT_TOPUP_5
+        sync: false
+      - key: DODO_PRODUCT_TOPUP_10
+        sync: false
+      # Used as the base URL for Dodo return_url after checkout completes
+      # (Dodo redirects the user back to <FRONTEND_URL>/pricing?dodo=success|cancel).
+      - key: FRONTEND_URL
+        sync: false
       - key: R2_ENDPOINT
         sync: false
       - key: R2_BUCKET

@@ -33,6 +33,16 @@ model User {
   currentPeriodEnd   DateTime?
   autoRenew          Boolean             @default(false)
   canceledAt         DateTime?
+
+  // ── Dodo Payments external IDs ──────────────────────────────────────────────
+  // dodoCustomerId — reused across checkouts so saved cards / billing details
+  //   persist between sessions. Set on first successful checkout.
+  // dodoSubscriptionId — present only while the user has an active or
+  //   cancelled (but not-yet-expired) subscription. Used by the webhook to map
+  //   events back to the user and by cancel/resume to call the Dodo API.
+  dodoCustomerId     String?
+  dodoSubscriptionId String?             @unique
+
   apiKeys            ApiKey[]
   transactions       CreditTransaction[]
   usageLogs          UsageLog[]

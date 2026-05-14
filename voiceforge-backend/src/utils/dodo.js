@@ -139,11 +139,11 @@ const createPlanCheckout = async ({ userId, email, name, planKey, dodoCustomerId
 // 'cancelled'. This matches our existing "keep access until period end" UX.
 const cancelDodoSubscription = async (subscriptionId, { reason } = {}) => {
   const client = getClient();
-  return client.subscriptions.update(subscriptionId, {
-    cancel_at_next_billing_date: true,
-    cancel_reason: 'cancelled_by_customer',
-    cancellation_comment: reason || null,
-  });
+  // Only attach cancellation_comment when the caller actually provided one —
+  // Dodo's API rejects an explicit null on some accounts.
+  const body = { cancel_at_next_billing_date: true, cancel_reason: 'cancelled_by_customer' };
+  if (reason) body.cancellation_comment = reason;
+  return client.subscriptions.update(subscriptionId, body);
 };
 
 // Resume = un-schedule the cancellation. Only valid if the period hasn't
@@ -153,6 +153,14 @@ const resumeDodoSubscription = async (subscriptionId) => {
   return client.subscriptions.update(subscriptionId, {
     cancel_at_next_billing_date: false,
   });
+};
+
+// Fetch live subscription state from Dodo. Used to reconcile when our local
+// cancel/resume API call fails (e.g. Dodo says "already in that state") — we
+// can confirm the true state and patch our DB instead of bouncing the user.
+const getDodoSubscription = async (subscriptionId) => {
+  const client = getClient();
+  return client.subscriptions.retrieve(subscriptionId);
 };
 
 // ── Webhook verification ─────────────────────────────────────────────────────
@@ -172,6 +180,7 @@ module.exports = {
   createPlanCheckout,
   cancelDodoSubscription,
   resumeDodoSubscription,
+  getDodoSubscription,
   verifyWebhook,
   lookupPlanByProductId,
   lookupTopUpUsdByProductId,

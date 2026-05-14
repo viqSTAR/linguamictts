@@ -604,6 +604,44 @@ const processDodoEvent = async (event) => {
     return;
   }
 
+  // ── Subscription on hold — renewal payment failed, dunning in progress ────
+  // User keeps access for now (Dodo will retry the card per its dunning
+  // schedule). We surface ON_HOLD so the UI can prompt the user to update
+  // their card. If Dodo recovers, .renewed fires and we flip back to ACTIVE.
+  // If retries exhaust, .expired fires and we downgrade.
+  if (type === 'subscription.on_hold') {
+    const userId = await resolveUserIdFromEvent(data);
+    if (!userId) return;
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        subscriptionStatus: 'ON_HOLD',
+        autoRenew: false,
+      },
+    }).catch(err => console.error('subscription.on_hold DB update failed:', err.message));
+    return;
+  }
+
+  // ── Subscription failed — initial charge or dunning exhausted ─────────────
+  // Treat as cancellation-pending so the UI surfaces the failure. We do NOT
+  // downgrade or strip the subscription_id here; .expired is what does that.
+  if (type === 'subscription.failed') {
+    const userId = await resolveUserIdFromEvent(data);
+    if (!userId) {
+      console.warn('Dodo subscription.failed without resolvable userId:', data.subscription_id, data.error_message || '');
+      return;
+    }
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        subscriptionStatus: 'FAILED',
+        autoRenew: false,
+      },
+    }).catch(err => console.error('subscription.failed DB update failed:', err.message));
+    return;
+  }
+
   // ── Subscription expired — downgrade to FREE ──────────────────────────────
   if (type === 'subscription.expired') {
     const userId = await resolveUserIdFromEvent(data);
@@ -623,8 +661,39 @@ const processDodoEvent = async (event) => {
     return;
   }
 
+  // ── Plan changed via Dodo customer portal ─────────────────────────────────
+  // Our /upgrade-plan and /dodo/checkout flows go through .active/.renewed,
+  // but if a user changes plan from Dodo's hosted portal we'd otherwise miss
+  // it. Defensive: refresh plan + credits using the same logic as activation.
+  if (type === 'subscription.plan_changed') {
+    const userId = await resolveUserIdFromEvent(data);
+    if (!userId) return;
+
+    const planKey = (data.metadata && data.metadata.planKey)
+      || (data.product_id ? require('../utils/dodo').lookupPlanByProductId(data.product_id) : null);
+    if (!planKey || !PLAN_CONFIG[planKey]) {
+      console.warn('plan_changed for unknown plan, subscription_id:', data.subscription_id, 'product_id:', data.product_id);
+      return;
+    }
+    const config = PLAN_CONFIG[planKey];
+    const nextPeriodEnd = data.next_billing_date ? new Date(data.next_billing_date) : undefined;
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        plan: planKey,
+        planMonthlyCredits: config.monthlyCredits,
+        subscriptionStatus: 'ACTIVE',
+        autoRenew: true,
+        ...(nextPeriodEnd ? { currentPeriodEnd: nextPeriodEnd } : {}),
+        canceledAt: null,
+      },
+    }).catch(err => console.error('subscription.plan_changed DB update failed:', err.message));
+    return;
+  }
+
   // ── Payment failed — surface for ops, no credit change ─────────────────────
-  if (type === 'payment.failed' || type === 'subscription.failed') {
+  if (type === 'payment.failed') {
     console.warn(`Dodo ${type}:`, data.payment_id || data.subscription_id, data.error_message || '');
     return;
   }
@@ -695,8 +764,24 @@ const cancelSubscription = async (req, res) => {
       try {
         await dodo.cancelDodoSubscription(user.dodoSubscriptionId, { reason: 'user-initiated' });
       } catch (err) {
-        console.error('Dodo cancel API failed:', err.message);
-        return res.status(502).json({ error: 'Failed to cancel subscription with payment provider' });
+        // Reconcile: if Dodo already has the subscription scheduled-to-cancel
+        // (or already cancelled / expired), our DB drifted — proceed with the
+        // local update instead of bouncing the user with a 502.
+        let reconciled = false;
+        try {
+          const sub = await dodo.getDodoSubscription(user.dodoSubscriptionId);
+          if (sub && (sub.cancel_at_next_billing_date === true
+            || sub.status === 'cancelled'
+            || sub.status === 'expired')) {
+            reconciled = true;
+          }
+        } catch (lookupErr) {
+          console.error('Dodo reconcile lookup failed:', lookupErr.message);
+        }
+        if (!reconciled) {
+          console.error('Dodo cancel API failed:', err.message);
+          return res.status(502).json({ error: 'Failed to cancel subscription with payment provider' });
+        }
       }
     }
 
@@ -754,8 +839,22 @@ const resumeSubscription = async (req, res) => {
       try {
         await dodo.resumeDodoSubscription(user.dodoSubscriptionId);
       } catch (err) {
-        console.error('Dodo resume API failed:', err.message);
-        return res.status(502).json({ error: 'Failed to resume subscription with payment provider' });
+        // Reconcile: if Dodo already shows the subscription as active with no
+        // pending cancellation, our local CANCELED state was stale — proceed
+        // with the resume instead of 502-ing the user.
+        let reconciled = false;
+        try {
+          const sub = await dodo.getDodoSubscription(user.dodoSubscriptionId);
+          if (sub && sub.cancel_at_next_billing_date === false && sub.status === 'active') {
+            reconciled = true;
+          }
+        } catch (lookupErr) {
+          console.error('Dodo reconcile lookup failed:', lookupErr.message);
+        }
+        if (!reconciled) {
+          console.error('Dodo resume API failed:', err.message);
+          return res.status(502).json({ error: 'Failed to resume subscription with payment provider' });
+        }
       }
     }
 
@@ -819,8 +918,27 @@ const setAutoPay = async (req, res) => {
           await dodo.cancelDodoSubscription(user.dodoSubscriptionId, { reason: 'auto-pay-disabled' });
         }
       } catch (err) {
-        console.error('Dodo auto-pay toggle failed:', err.message);
-        return res.status(502).json({ error: 'Failed to update auto-pay with payment provider' });
+        // Reconcile against live Dodo state — if it already matches the target
+        // (toggle is a no-op), proceed; otherwise surface the failure.
+        let reconciled = false;
+        try {
+          const sub = await dodo.getDodoSubscription(user.dodoSubscriptionId);
+          if (sub) {
+            const dodoAutoRenewOn = sub.cancel_at_next_billing_date === false && sub.status === 'active';
+            const dodoAutoRenewOff = sub.cancel_at_next_billing_date === true
+              || sub.status === 'cancelled'
+              || sub.status === 'expired';
+            if ((enabled && dodoAutoRenewOn) || (!enabled && dodoAutoRenewOff)) {
+              reconciled = true;
+            }
+          }
+        } catch (lookupErr) {
+          console.error('Dodo reconcile lookup failed:', lookupErr.message);
+        }
+        if (!reconciled) {
+          console.error('Dodo auto-pay toggle failed:', err.message);
+          return res.status(502).json({ error: 'Failed to update auto-pay with payment provider' });
+        }
       }
     }
 

@@ -9,10 +9,26 @@ const getMonthKey = (date) => {
   return `${year}-${month}`;
 };
 
-// First moment of the next calendar month in UTC. Used as the next
-// `currentPeriodEnd` when a subscription renews or is first activated.
+// First moment of the next calendar month in UTC. Kept for any caller that
+// genuinely needs a month-aligned boundary; do NOT use this for per-subscription
+// renewals — those follow the purchase anniversary (use addMonthsUtc instead).
 const endOfCurrentMonthUtc = (now = new Date()) => {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0, 0));
+};
+
+// Same-day-next-month in UTC, clamped to end-of-month if the day doesn't
+// exist (Jan 31 → Feb 28/29). Used as the fallback for a subscription's
+// next billing date so each sub keeps its purchase anniversary regardless
+// of which day of the month it was bought.
+const addMonthsUtc = (date, months = 1) => {
+  const base = date instanceof Date ? date : new Date(date);
+  const y = base.getUTCFullYear();
+  const m = base.getUTCMonth();
+  const d = base.getUTCDate();
+  const target = new Date(Date.UTC(y, m + months, 1, base.getUTCHours(), base.getUTCMinutes(), base.getUTCSeconds(), base.getUTCMilliseconds()));
+  const lastOfTargetMonth = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(d, lastOfTargetMonth));
+  return target;
 };
 
 // Mirror of voiceforge-api/main.py — keep in sync
@@ -340,6 +356,7 @@ module.exports = {
   FREE_MONTHLY_CREDITS,
   getMonthKey,
   endOfCurrentMonthUtc,
+  addMonthsUtc,
   ensureMonthlyCredits,
   VALID_ORPHEUS_EMOTIONS,
   computeTtsCredits,

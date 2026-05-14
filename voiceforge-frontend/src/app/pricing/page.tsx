@@ -357,7 +357,11 @@ export default function Pricing() {
         <div className="grid lg:grid-cols-4 md:grid-cols-2 gap-6 w-full">
           {PLAN_DEFINITIONS.map((plan, index) => {
             const isFreePlan = plan.key === 'FREE';
-            const heldCount = activeSubs.filter(s => s.planKey === plan.key && (s.status === 'ACTIVE' || s.status === 'CANCELED')).length;
+            // A user can stack different tiers but not buy the same tier twice
+            // — the backend rejects with 409 anyway, so we mirror that as a
+            // disabled state instead of letting the click fail.
+            const heldSub = activeSubs.find(s => s.planKey === plan.key && (s.status === 'ACTIVE' || s.status === 'CANCELED' || s.status === 'ON_HOLD'));
+            const isAlreadyHeld = !!heldSub;
 
             let ctaButton;
             if (isFreePlan) {
@@ -369,6 +373,13 @@ export default function Pricing() {
                   {plan.cta}
                 </Link>
               );
+            } else if (isLoggedIn && isAlreadyHeld) {
+              ctaButton = (
+                <div className="w-full h-12 rounded-full font-semibold flex items-center justify-center mb-8 relative z-10 bg-green-50 text-green-700 border border-green-200 cursor-not-allowed gap-2">
+                  <Check className="w-4 h-4" />
+                  {heldSub.status === 'CANCELED' ? 'Active (ends at period end)' : heldSub.status === 'ON_HOLD' ? 'On hold' : 'Already on this plan'}
+                </div>
+              );
             } else if (isLoggedIn) {
               ctaButton = (
                 <button
@@ -379,7 +390,7 @@ export default function Pricing() {
                       : 'bg-neutral-900 text-white hover:bg-neutral-800'
                   }`}
                 >
-                  {heldCount > 0 ? `Buy another ${plan.name}` : plan.cta}
+                  {plan.cta}
                 </button>
               );
             } else {
@@ -403,7 +414,7 @@ export default function Pricing() {
                 initial={{ opacity: 0, y: 24 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.45, delay: 0.1 + index * 0.05 }}
-                className={`${plan.theme} backdrop-blur-2xl border rounded-[2rem] p-7 md:p-8 shadow-[0_18px_50px_-30px_rgba(0,0,0,0.35)] hover:-translate-y-1 transition-all flex flex-col relative overflow-hidden ${heldCount > 0 ? 'ring-2 ring-green-400/50' : ''}`}
+                className={`${plan.theme} backdrop-blur-2xl border rounded-[2rem] p-7 md:p-8 shadow-[0_18px_50px_-30px_rgba(0,0,0,0.35)] hover:-translate-y-1 transition-all flex flex-col relative overflow-hidden ${isAlreadyHeld ? 'ring-2 ring-green-400/50' : ''}`}
               >
                 <div className={`absolute -top-16 -right-12 h-32 w-32 rounded-full ${plan.highlight} blur-[60px] opacity-70`} />
                 <div className="flex items-center justify-between mb-6 relative z-10">
@@ -413,9 +424,9 @@ export default function Pricing() {
                       <Sparkles className="w-3 h-3" /> Popular
                     </span>
                   )}
-                  {heldCount > 0 && (
+                  {isAlreadyHeld && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-green-500/20 text-green-700 px-2.5 py-1 text-[10px] font-semibold uppercase">
-                      <Check className="w-3 h-3" /> {heldCount > 1 ? `${heldCount} active` : 'Active'}
+                      <Check className="w-3 h-3" /> Active
                     </span>
                   )}
                 </div>

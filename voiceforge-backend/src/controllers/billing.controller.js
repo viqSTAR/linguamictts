@@ -1,5 +1,5 @@
 const prisma = require('../utils/prisma');
-const { getMonthKey, endOfCurrentMonthUtc } = require('../utils/credits');
+const { getMonthKey, addMonthsUtc } = require('../utils/credits');
 const dodo = require('../utils/dodo');
 
 // ─── Plan + top-up config (single source of truth) ────────────────────────────
@@ -101,6 +101,28 @@ const createDodoCheckout = async (req, res) => {
       const planKey = (plan || '').toUpperCase();
       if (!PLAN_CONFIG[planKey]) {
         return res.status(400).json({ error: 'Invalid plan. Must be STARTER, CREATOR, or PRO.' });
+      }
+
+      // Same-plan duplicate guard. Users can stack different tiers (STARTER +
+      // PRO is fine) but not the same tier twice — that would mean two
+      // recurring charges for the same product, which is almost always a
+      // mis-click. CANCELED still blocks because the user retains access until
+      // their period ends; they can resume that one or wait for it to expire.
+      // FAILED / EXPIRED don't block (the previous attempt is dead).
+      const existing = await prisma.subscription.findFirst({
+        where: {
+          userId: user.id,
+          planKey,
+          status: { in: ['ACTIVE', 'CANCELED', 'ON_HOLD'] },
+        },
+        select: { id: true, status: true, currentPeriodEnd: true },
+      });
+      if (existing) {
+        return res.status(409).json({
+          error: `You already have a ${planKey} subscription${existing.status === 'CANCELED' ? ' (scheduled to end)' : existing.status === 'ON_HOLD' ? ' (on hold — please update your card)' : ''}. Pick a different tier or manage your existing plan.`,
+          existingSubscriptionId: existing.id,
+          existingStatus: existing.status,
+        });
       }
 
       const { checkoutUrl, sessionId } = await dodo.createPlanCheckout({
@@ -252,9 +274,6 @@ const processDodoEvent = async (event) => {
 
     const config = PLAN_CONFIG[planKey];
     const monthKey = getMonthKey(new Date());
-    const nextPeriodEnd = data.next_billing_date
-      ? new Date(data.next_billing_date)
-      : endOfCurrentMonthUtc();
 
     // Marker key is scoped to the specific subscription_id so two simultaneous
     // subscriptions on the same plan don't share a single marker.
@@ -269,8 +288,20 @@ const processDodoEvent = async (event) => {
       await prisma.$transaction(async (tx) => {
         const existing = await tx.subscription.findUnique({
           where: { dodoSubscriptionId: data.subscription_id },
-          select: { id: true, creditsRemaining: true },
+          select: { id: true, creditsRemaining: true, currentPeriodEnd: true },
         });
+
+        // Pick the next period end:
+        //   • Always prefer Dodo's next_billing_date when present — that's the
+        //     true source of truth and it follows the purchase anniversary.
+        //   • Activation fallback: now + 1 month (today as the anniversary).
+        //   • Renewal fallback: previous currentPeriodEnd + 1 month, so two
+        //     subs bought on day 4 and day 6 stay on their own dates and never
+        //     collapse to a shared calendar boundary.
+        const fallbackBase = existing ? existing.currentPeriodEnd : new Date();
+        const nextPeriodEnd = data.next_billing_date
+          ? new Date(data.next_billing_date)
+          : addMonthsUtc(fallbackBase, 1);
 
         let delta;
         if (existing) {
@@ -411,15 +442,19 @@ const processDodoEvent = async (event) => {
       return;
     }
     const config = PLAN_CONFIG[planKey];
-    const nextPeriodEnd = data.next_billing_date ? new Date(data.next_billing_date) : undefined;
 
     try {
       await prisma.$transaction(async (tx) => {
         const sub = await tx.subscription.findUnique({
           where: { dodoSubscriptionId: data.subscription_id },
-          select: { id: true, userId: true, creditsRemaining: true },
+          select: { id: true, userId: true, creditsRemaining: true, currentPeriodEnd: true },
         });
         if (!sub) return;
+        // Anniversary-preserving: roll forward by one month from the prior
+        // period end if Dodo didn't supply a fresh next_billing_date.
+        const nextPeriodEnd = data.next_billing_date
+          ? new Date(data.next_billing_date)
+          : addMonthsUtc(sub.currentPeriodEnd, 1);
         const delta = config.monthlyCredits - sub.creditsRemaining;
         await tx.subscription.update({
           where: { id: sub.id },
@@ -429,7 +464,7 @@ const processDodoEvent = async (event) => {
             creditsRemaining: config.monthlyCredits,
             status: 'ACTIVE',
             autoRenew: true,
-            ...(nextPeriodEnd ? { currentPeriodEnd: nextPeriodEnd } : {}),
+            currentPeriodEnd: nextPeriodEnd,
             canceledAt: null,
           },
         });

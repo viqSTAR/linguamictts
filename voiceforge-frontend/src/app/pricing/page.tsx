@@ -184,6 +184,26 @@ export default function Pricing() {
     if (!token) return;
     setModal(p => ({ ...p, step: 'processing' }));
     try {
+      // Snapshot the user's pre-payment state so /billing/return can detect
+      // the credit/plan change even if Dodo's webhook lands before our
+      // first poll (which is the common case — webhook is faster than the
+      // user's redirect back). Without this, the return page snapshots
+      // the already-updated state and never sees a "change" → false timeout.
+      try {
+        const meRes = await fetch((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000') + '/auth/me', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const meData = await meRes.json();
+        if (meData?.user) {
+          sessionStorage.setItem('dodo_pre_checkout', JSON.stringify({
+            plan: meData.user.plan,
+            balance: meData.user.creditsBalance,
+            kind: payload.kind,
+            ts: Date.now(),
+          }));
+        }
+      } catch { /* non-fatal: return page has absolute-state fallback */ }
+
       const res = await fetch((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000') + '/billing/dodo/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },

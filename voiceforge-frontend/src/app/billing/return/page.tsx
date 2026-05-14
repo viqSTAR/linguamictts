@@ -56,8 +56,22 @@ function BillingReturn() {
       return;
     }
 
-    // Snapshot the user state at landing so we can detect any change.
-    let initial: { plan: string; balance: number } | null = null;
+    // Pre-checkout snapshot saved by /pricing right before redirecting. We
+    // CANNOT snapshot on the first poll here because Dodo's webhook usually
+    // fires before this page mounts — the first /auth/me already returns the
+    // post-payment state, so a self-snapshot would never observe a "change".
+    let pre: { plan?: string; balance?: number; ts?: number } | null = null;
+    try {
+      const raw = sessionStorage.getItem('dodo_pre_checkout');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        // Stale snapshots (>30min) are likely from an abandoned session.
+        if (parsed && typeof parsed.ts === 'number' && Date.now() - parsed.ts < 30 * 60 * 1000) {
+          pre = parsed;
+        }
+      }
+    } catch { /* ignore parse errors */ }
+
     let cancelled = false;
     let polls = 0;
 
@@ -65,6 +79,28 @@ function BillingReturn() {
       fetch(`${API_URL}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
         .then(r => r.json())
         .catch(() => null);
+
+    // Success conditions — chosen so they don't depend on a perfect pre-snapshot:
+    //   plan kind  → user is on a paid plan with an ACTIVE subscription.
+    //                The checkout endpoint refuses upgrades from existing paid
+    //                subs, so FREE→paid is the only path → this is unambiguous.
+    //   topup kind → balance strictly greater than the pre-checkout snapshot.
+    //                If no snapshot exists (cleared cache, etc.), we accept any
+    //                ACTIVE state for plan; for topup we fall back to "balance
+    //                grew vs the first poll we observed" with a small grace.
+    const isSuccess = (u: { plan: string; creditsBalance: number; subscriptionStatus?: string; dodoSubscriptionId?: string | null }, firstSeenBalance: number | null): boolean => {
+      if (kind === 'plan') {
+        return u.plan !== 'FREE' && u.subscriptionStatus === 'ACTIVE';
+      }
+      if (kind === 'topup') {
+        if (pre && typeof pre.balance === 'number') return u.creditsBalance > pre.balance;
+        if (firstSeenBalance !== null) return u.creditsBalance > firstSeenBalance;
+        return false;
+      }
+      return false;
+    };
+
+    let firstSeenBalance: number | null = null;
 
     const tick = async () => {
       if (cancelled) return;
@@ -77,21 +113,13 @@ function BillingReturn() {
         else setTimeout(tick, POLL_INTERVAL_MS);
         return;
       }
+      if (firstSeenBalance === null) firstSeenBalance = u.creditsBalance;
 
-      if (!initial) {
-        initial = { plan: u.plan, balance: u.creditsBalance };
-        polls += 1;
-        if (polls >= MAX_POLLS) setPhase('timeout');
-        else setTimeout(tick, POLL_INTERVAL_MS);
-        return;
-      }
-
-      const planChanged = kind === 'plan' && u.plan !== initial.plan;
-      const balanceIncreased = kind === 'topup' && u.creditsBalance > initial.balance;
-      if (planChanged || balanceIncreased) {
+      if (isSuccess(u, firstSeenBalance)) {
         setPlan(u.plan);
         setBalance(u.creditsBalance);
         setPhase('success');
+        try { sessionStorage.removeItem('dodo_pre_checkout'); } catch { /* ignore */ }
         return;
       }
       polls += 1;

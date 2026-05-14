@@ -507,6 +507,20 @@ const processDodoEvent = async (event) => {
     const txType = isActivation ? 'PLAN_UPGRADE' : 'MONTHLY_RESET';
     const nextPeriodEnd = data.next_billing_date ? new Date(data.next_billing_date) : endOfCurrentMonthUtc();
 
+    // Pre-check the monthKey marker OUTSIDE the transaction: a duplicate-insert
+    // inside $transaction aborts it (Postgres 25P02) and the surrounding
+    // catch can't recover, which would silently drop the user.update below.
+    // Safe to read first — the (userId, type, referenceId) unique index makes
+    // the marker insert itself idempotent if a race actually fires.
+    let markerAlreadyExists = false;
+    if (!isActivation) {
+      const existingMarker = await prisma.creditTransaction.findFirst({
+        where: { userId, type: 'MONTHLY_RESET', referenceId: monthKey },
+        select: { id: true },
+      });
+      markerAlreadyExists = !!existingMarker;
+    }
+
     try {
       await prisma.$transaction(async (tx) => {
         const user = await tx.user.findUnique({
@@ -537,18 +551,16 @@ const processDodoEvent = async (event) => {
 
         // ALSO insert a MONTHLY_RESET marker (renewal only) so the next call
         // to ensureMonthlyCredits sees this month as processed.
-        if (!isActivation) {
-          try {
-            await tx.creditTransaction.create({
-              data: {
-                userId,
-                amount: 0,
-                type: 'MONTHLY_RESET',
-                description: `Dodo renewal marker for ${monthKey}`,
-                referenceId: monthKey,
-              },
-            });
-          } catch (e) { if (!isDuplicateTxn(e)) throw e; }
+        if (!isActivation && !markerAlreadyExists) {
+          await tx.creditTransaction.create({
+            data: {
+              userId,
+              amount: 0,
+              type: 'MONTHLY_RESET',
+              description: `Dodo renewal marker for ${monthKey}`,
+              referenceId: monthKey,
+            },
+          });
         }
 
         await tx.user.update({

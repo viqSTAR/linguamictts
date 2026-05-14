@@ -6,47 +6,105 @@ datasource db {
   provider = "postgresql"
 }
 
+// User holds account state + cached credit totals. Per-plan / per-top-up
+// detail lives in Subscription and AddonGrant — usage drains those buckets
+// in FIFO order (free monthly → oldest sub → oldest addon).
 model User {
-  id                 String              @id @default(uuid())
-  email              String              @unique
-  passwordHash       String
-  name               String?
-  creditsBalance     Int                 @default(12000)
-  addonCredits       Int                 @default(0)
+  id           String  @id @default(uuid())
+  email        String  @unique
+  passwordHash String
+  name         String?
+
+  // Denormalized total = freeCreditsRemaining + Σ Subscription.creditsRemaining
+  //                    + Σ AddonGrant.creditsRemaining
+  // Kept in sync inside every grant/drain transaction so the hot-path
+  // gte-check on reserve doesn't have to SUM three tables.
+  creditsBalance Int @default(12000)
+  // Denormalized sum of AddonGrant.creditsRemaining — surfaced separately
+  // because top-ups don't expire and the UI shows them apart from plan credits.
+  addonCredits   Int @default(0)
+
+  // Free-tier monthly bucket — every user gets one, no Subscription row needed.
+  // Resets on the first authenticated request each calendar month.
+  freeCreditsRemaining Int     @default(12000)
+  freeMonthKey         String?
+
   lastAudioKey       String?
   lastAudioUrl       String?
   lastAudioUpdatedAt DateTime?
   lastAudioMp3Key    String?
   lastAudioMp3Url    String?
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-  plan               PlanTier            @default(FREE)
-  planMonthlyCredits Int                 @default(10000)
-  planStartedAt      DateTime            @default(now())
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  // ── Subscription lifecycle ──────────────────────────────────────────────────
-  // subscriptionStatus values:
-  //   NONE     — FREE plan, no subscription
-  //   ACTIVE   — paid plan, will auto-renew at currentPeriodEnd
-  //   CANCELED — paid plan, will downgrade to FREE at currentPeriodEnd
-  subscriptionStatus String              @default("NONE")
-  currentPeriodEnd   DateTime?
-  autoRenew          Boolean             @default(false)
-  canceledAt         DateTime?
+  // Dodo customer id is shared across this user's subscriptions and top-ups
+  // so saved cards / billing addresses persist.
+  dodoCustomerId String?
 
-  // ── Dodo Payments external IDs ──────────────────────────────────────────────
-  // dodoCustomerId — reused across checkouts so saved cards / billing details
-  //   persist between sessions. Set on first successful checkout.
-  // dodoSubscriptionId — present only while the user has an active or
-  //   cancelled (but not-yet-expired) subscription. Used by the webhook to map
-  //   events back to the user and by cancel/resume to call the Dodo API.
-  dodoCustomerId     String?
-  dodoSubscriptionId String?             @unique
+  apiKeys       ApiKey[]
+  transactions  CreditTransaction[]
+  usageLogs     UsageLog[]
+  subscriptions Subscription[]
+  addonGrants   AddonGrant[]
+  presets       Json?               @default("[]")
 
-  apiKeys            ApiKey[]
-  transactions       CreditTransaction[]
-  usageLogs          UsageLog[]
-  presets            Json?               @default("[]")
+  @@index([dodoCustomerId])
+}
+
+// One row per paid subscription. A user can hold many (any plan, any quantity).
+// Each subscription has its own credit bucket that resets on renewal, its own
+// cancel/autopay state, and its own Dodo subscription id.
+model Subscription {
+  id     String @id @default(uuid())
+  userId String
+
+  // STARTER | CREATOR | PRO — free-form text so adding a tier doesn't need a
+  // schema migration. Validated against PLAN_CONFIG in code.
+  planKey        String
+  monthlyCredits Int
+
+  // This subscription's remaining credits for the current billing period.
+  // Renewals set this back to monthlyCredits. Drains in FIFO order with
+  // sibling subscriptions (oldest createdAt first).
+  creditsRemaining Int
+
+  // ACTIVE       — renews at currentPeriodEnd if autoRenew=true
+  // CANCELED     — scheduled to expire at currentPeriodEnd (still has access)
+  // ON_HOLD      — Dodo dunning in progress; UI prompts card update
+  // FAILED       — initial charge or dunning exhausted
+  // EXPIRED      — period ended, bucket zeroed, no further renewals
+  status           String    @default("ACTIVE")
+  autoRenew        Boolean   @default(true)
+  currentPeriodEnd DateTime
+  canceledAt       DateTime?
+
+  dodoSubscriptionId String?  @unique
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([userId, status])
+}
+
+// One row per top-up purchase. Permanent credits — never expire. Drains
+// last, after every monthly bucket (free + plan subs). Oldest first within
+// the addon pool so refunds and accounting line up with purchase order.
+model AddonGrant {
+  id     String @id @default(uuid())
+  userId String
+
+  creditsRemaining Int
+  originalAmount   Int
+  amountUSD        Int
+
+  dodoPaymentId String?  @unique
+  createdAt     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
 }
 
 model ApiKey {
@@ -73,8 +131,7 @@ model CreditTransaction {
   user        User     @relation(fields: [userId], references: [id])
 
   // Idempotency: one transaction per (user, type, referenceId). Prevents
-  // duplicate top-ups when /verify or /dummy-topup is called twice with the
-  // same payment id, and one MONTHLY_RESET per user per month.
+  // duplicate top-ups and ensures one MONTHLY_RESET per (subscription, month).
   // Postgres allows multiple NULL referenceIds, so legacy rows without one
   // (e.g. raw USAGE_DEDUCT logs) are unaffected.
   @@unique([userId, type, referenceId], name: "uniq_user_tx_ref")
@@ -92,11 +149,4 @@ model UsageLog {
   createdAt        DateTime @default(now())
   apiKey           ApiKey?  @relation(fields: [apiKeyId], references: [id])
   user             User     @relation(fields: [userId], references: [id])
-}
-
-enum PlanTier {
-  FREE
-  STARTER
-  CREATOR
-  PRO
 }

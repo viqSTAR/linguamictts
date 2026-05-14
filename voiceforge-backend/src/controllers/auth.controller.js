@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const axios = require('axios');
 const prisma = require('../utils/prisma');
-const { FIRST_MONTH_CREDITS, DEFAULT_MONTHLY_CREDITS } = require('../utils/credits');
+const { FIRST_MONTH_FREE_CREDITS } = require('../utils/credits');
 const { OAuth2Client } = require('google-auth-library');
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -61,9 +61,8 @@ const register = async (req, res) => {
           email: normalizedEmail,
           passwordHash,
           name: typeof name === 'string' ? name.trim().slice(0, 80) : null,
-          creditsBalance: FIRST_MONTH_CREDITS,
-          plan: 'FREE',
-          planMonthlyCredits: DEFAULT_MONTHLY_CREDITS,
+          creditsBalance: FIRST_MONTH_FREE_CREDITS,
+          freeCreditsRemaining: FIRST_MONTH_FREE_CREDITS,
         },
       });
     } catch (err) {
@@ -85,8 +84,7 @@ const register = async (req, res) => {
         name: user.name,
         creditsBalance: user.creditsBalance,
         addonCredits: user.addonCredits,
-        plan: user.plan,
-        planMonthlyCredits: user.planMonthlyCredits,
+        freeCreditsRemaining: user.freeCreditsRemaining,
       },
       apiKey: rawApiKey,
     });
@@ -129,8 +127,7 @@ const login = async (req, res) => {
         name: user.name,
         creditsBalance: user.creditsBalance,
         addonCredits: user.addonCredits,
-        plan: user.plan,
-        planMonthlyCredits: user.planMonthlyCredits,
+        freeCreditsRemaining: user.freeCreditsRemaining,
       },
     });
   } catch (error) {
@@ -149,17 +146,28 @@ const getMe = async (req, res) => {
         name: true,
         creditsBalance: true,
         addonCredits: true,
-        plan: true,
-        planMonthlyCredits: true,
+        freeCreditsRemaining: true,
+        freeMonthKey: true,
         createdAt: true,
         lastAudioUrl: true,
         lastAudioMp3Url: true,
         lastAudioUpdatedAt: true,
         presets: true,
-        subscriptionStatus: true,
-        currentPeriodEnd: true,
-        autoRenew: true,
-        canceledAt: true,
+        subscriptions: {
+          where: { status: { in: ['ACTIVE', 'CANCELED', 'ON_HOLD', 'FAILED'] } },
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            planKey: true,
+            monthlyCredits: true,
+            creditsRemaining: true,
+            status: true,
+            autoRenew: true,
+            currentPeriodEnd: true,
+            canceledAt: true,
+            createdAt: true,
+          },
+        },
       },
     });
 
@@ -283,9 +291,8 @@ const googleAuth = async (req, res) => {
             email: normalizedEmail,
             passwordHash,
             name: name || normalizedEmail.split('@')[0],
-            creditsBalance: FIRST_MONTH_CREDITS,
-            plan: 'FREE',
-            planMonthlyCredits: DEFAULT_MONTHLY_CREDITS,
+            creditsBalance: FIRST_MONTH_FREE_CREDITS,
+            freeCreditsRemaining: FIRST_MONTH_FREE_CREDITS,
           },
         });
       } catch (err) {
@@ -314,8 +321,7 @@ const googleAuth = async (req, res) => {
         name: user.name,
         creditsBalance: user.creditsBalance,
         addonCredits: user.addonCredits,
-        plan: user.plan,
-        planMonthlyCredits: user.planMonthlyCredits,
+        freeCreditsRemaining: user.freeCreditsRemaining,
         picture,
       },
       ...(isNewUser && newApiKey ? { apiKey: newApiKey } : {}),
@@ -356,7 +362,7 @@ const updateMe = async (req, res) => {
     const updatedUser = await prisma.user.update({
       where: { id: req.userId },
       data,
-      select: { id: true, email: true, name: true, creditsBalance: true, addonCredits: true, plan: true, planMonthlyCredits: true, presets: true },
+      select: { id: true, email: true, name: true, creditsBalance: true, addonCredits: true, freeCreditsRemaining: true, presets: true },
     });
     res.json({ user: updatedUser });
   } catch (error) {

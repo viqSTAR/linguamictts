@@ -1,9 +1,21 @@
 "use client";
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Navbar from '../../components/Navbar';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, Sparkles, Loader2, CreditCard, X, CheckCircle2, ArrowRight, Zap } from 'lucide-react';
+
+type Subscription = {
+  id: string;
+  planKey: string;
+  monthlyCredits: number;
+  creditsRemaining: number;
+  status: 'ACTIVE' | 'CANCELED' | 'ON_HOLD' | 'FAILED';
+  autoRenew: boolean;
+  currentPeriodEnd: string;
+  canceledAt: string | null;
+  createdAt: string;
+};
 
 const PLAN_DEFINITIONS = [
   {
@@ -74,24 +86,11 @@ const PLAN_CREDITS: Record<string, number> = {
   PRO: 850000,
 };
 
-const PLAN_RANK: Record<string, number> = {
-  FREE: 0,
-  STARTER: 1,
-  CREATOR: 2,
-  PRO: 3,
-};
-
 const TOPUP_TIERS = [
   { amountUSD: 1,  credits: 5000  },
   { amountUSD: 5,  credits: 25000 },
   { amountUSD: 10, credits: 55000 },
 ];
-
-// ── Secret test credentials — share ONLY with your testers ──────────────────
-// Card: 4928 1746 8293 0571 | Expiry: 12/26 | CVV: 786
-// UPI:  pay@linguamic
-const TEST_CARD = '4928174682930571';
-const TEST_UPI  = 'pay@linguamic';
 
 type ModalState = {
   open: boolean;
@@ -118,42 +117,61 @@ const defaultModal: ModalState = {
 
 export default function Pricing() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [currentPlan, setCurrentPlan] = useState<string>('');
   const [modal, setModal] = useState<ModalState>(defaultModal);
-  // When the backend has Dodo Payments configured (DODO_ENABLED=true), we
-  // skip the mock card/UPI form and redirect to Dodo's hosted checkout.
-  // The /billing/plans endpoint reports this so the UI knows which mode to
-  // render — no separate frontend env var needed.
+  // /billing/plans reports whether Dodo is wired up. Dummy/mock paths are
+  // gone — if Dodo isn't enabled the buy buttons are disabled.
   const [dodoEnabled, setDodoEnabled] = useState(false);
+  const [activeSubs, setActiveSubs] = useState<Subscription[]>([]);
+  const [subsLoading, setSubsLoading] = useState(false);
+  const [subBusyId, setSubBusyId] = useState<string | null>(null);
 
-  // Holds latest form values from PaymentFormMock without causing re-renders
-  const formValuesRef = React.useRef<{ tab: 'card' | 'upi'; cardNumber: string; upiId: string }>({
-    tab: 'card', cardNumber: '', upiId: '',
-  });
-
-  const validatePaymentForm = () => {
-    const { tab, cardNumber, upiId } = formValuesRef.current;
-    if (tab === 'card') return cardNumber.replace(/\s/g, '') === TEST_CARD;
-    return upiId.trim().toLowerCase() === TEST_UPI.toLowerCase();
-  };
+  const fetchActiveSubs = useCallback(async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    setSubsLoading(true);
+    try {
+      const res = await fetch((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000') + '/billing/subscriptions', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok && Array.isArray(data.subscriptions)) setActiveSubs(data.subscriptions);
+    } catch { /* non-fatal */ }
+    finally { setSubsLoading(false); }
+  }, []);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
     setIsLoggedIn(!!token);
-    if (token) {
-      fetch((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000') + '/auth/me', {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-        .then(r => r.json())
-        .then(d => { if (d.user?.plan) setCurrentPlan(d.user.plan); })
-        .catch(() => {});
-    }
-    // /billing/plans is public — tells us whether Dodo is wired up.
+    if (token) fetchActiveSubs();
     fetch((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000') + '/billing/plans')
       .then(r => r.json())
       .then(d => { if (typeof d.dodoEnabled === 'boolean') setDodoEnabled(d.dodoEnabled); })
       .catch(() => {});
-  }, []);
+  }, [fetchActiveSubs]);
+
+  const performSubAction = async (subId: string, action: 'cancel' | 'resume' | 'autopay', body?: object) => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    setSubBusyId(subId);
+    try {
+      const res = await fetch(
+        (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000') +
+          `/billing/subscriptions/${subId}/${action}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: body ? JSON.stringify(body) : undefined,
+        },
+      );
+      const data = await res.json();
+      if (!res.ok) alert(data.error || 'Action failed');
+      await fetchActiveSubs();
+    } catch {
+      alert('Network error. Try again.');
+    } finally {
+      setSubBusyId(null);
+    }
+  };
 
   const openTopUp = (amountUSD: number, credits: number) => {
     const token = localStorage.getItem('token');
@@ -195,9 +213,13 @@ export default function Pricing() {
         });
         const meData = await meRes.json();
         if (meData?.user) {
+          const subCount = Array.isArray(meData.user.subscriptions)
+            ? meData.user.subscriptions.filter((s: { status?: string }) =>
+                s.status === 'ACTIVE' || s.status === 'CANCELED' || s.status === 'ON_HOLD').length
+            : 0;
           sessionStorage.setItem('dodo_pre_checkout', JSON.stringify({
-            plan: meData.user.plan,
             balance: meData.user.creditsBalance,
+            subCount,
             kind: payload.kind,
             ts: Date.now(),
           }));
@@ -223,68 +245,19 @@ export default function Pricing() {
   };
 
   const processTopUp = async () => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-    if (dodoEnabled) {
-      await redirectToDodo({ kind: 'topup', amountUSD: modal.amountUSD });
+    if (!dodoEnabled) {
+      alert('Payments are temporarily unavailable. Please try again later.');
       return;
     }
-    if (!validatePaymentForm()) {
-      alert('❌ Invalid payment details.\n\nPlease use the test credentials provided to you.');
-      return;
-    }
-    setModal(p => ({ ...p, step: 'processing' }));
-    await new Promise(r => setTimeout(r, 1500));
-    try {
-      const res = await fetch((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000') + '/billing/dummy-topup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ amountUSD: modal.amountUSD }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setModal(p => ({ ...p, step: 'success', newBalance: data.newBalance }));
-      } else {
-        alert(`Error: ${data.error || 'Failed to process top-up'}`);
-        setModal(defaultModal);
-      }
-    } catch {
-      alert('Network error while processing top-up.');
-      setModal(defaultModal);
-    }
+    await redirectToDodo({ kind: 'topup', amountUSD: modal.amountUSD });
   };
 
   const processPlanUpgrade = async () => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-    if (dodoEnabled) {
-      await redirectToDodo({ kind: 'plan', plan: modal.planKey });
+    if (!dodoEnabled) {
+      alert('Payments are temporarily unavailable. Please try again later.');
       return;
     }
-    if (!validatePaymentForm()) {
-      alert('❌ Invalid payment details.\n\nPlease use the test credentials provided to you.');
-      return;
-    }
-    setModal(p => ({ ...p, step: 'processing' }));
-    await new Promise(r => setTimeout(r, 1500));
-    try {
-      const res = await fetch((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000') + '/billing/upgrade-plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ plan: modal.planKey }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setCurrentPlan(data.plan);
-        setModal(p => ({ ...p, step: 'success', newBalance: data.newBalance, newPlan: data.plan }));
-      } else {
-        alert(`Error: ${data.error || 'Failed to upgrade plan'}`);
-        setModal(defaultModal);
-      }
-    } catch {
-      alert('Network error while upgrading plan.');
-      setModal(defaultModal);
-    }
+    await redirectToDodo({ kind: 'plan', plan: modal.planKey });
   };
 
   return (
@@ -304,28 +277,90 @@ export default function Pricing() {
           <p className="text-xl text-neutral-500 max-w-2xl mx-auto font-light">Launch for free, then scale with a predictable credit system designed to stay 60% cheaper.</p>
         </motion.div>
 
+        {/* Active subscriptions — only renders for logged-in users with at least one paid sub. */}
+        {isLoggedIn && activeSubs.length > 0 && (
+          <div className="w-full mb-12 bg-white/80 backdrop-blur-xl border border-black/5 rounded-[2rem] p-6 md:p-8 shadow-[0_18px_50px_-30px_rgba(0,0,0,0.35)]">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-xl font-semibold text-neutral-900">Your active plans</h2>
+              <span className="text-xs uppercase tracking-widest text-neutral-400">{activeSubs.length} active</span>
+            </div>
+            <div className="space-y-3">
+              {activeSubs.map(s => {
+                const periodEnd = new Date(s.currentPeriodEnd);
+                const cancelled = s.status === 'CANCELED' || s.autoRenew === false;
+                const onHold = s.status === 'ON_HOLD';
+                const failed = s.status === 'FAILED';
+                return (
+                  <div key={s.id} className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-4 rounded-2xl border border-black/5 bg-neutral-50/60">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-neutral-900">{s.planKey}</span>
+                        <span className={`text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full ${
+                          failed ? 'bg-red-100 text-red-700' :
+                          onHold ? 'bg-amber-100 text-amber-800' :
+                          cancelled ? 'bg-neutral-200 text-neutral-700' :
+                          'bg-green-100 text-green-700'
+                        }`}>
+                          {failed ? 'Failed' : onHold ? 'On hold' : cancelled ? 'Auto-pay off' : 'Active'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-neutral-500 mt-1">
+                        {s.creditsRemaining.toLocaleString()} / {s.monthlyCredits.toLocaleString()} credits
+                        {' · '}
+                        {cancelled ? 'Ends' : 'Renews'} {periodEnd.toLocaleDateString()}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {!cancelled && !failed && !onHold && (
+                        <button
+                          onClick={() => performSubAction(s.id, 'autopay', { enabled: false })}
+                          disabled={subBusyId === s.id}
+                          className="text-xs h-9 px-3 rounded-xl border border-neutral-200 hover:bg-neutral-100 transition-colors text-neutral-700 disabled:opacity-50"
+                        >
+                          Turn auto-pay off
+                        </button>
+                      )}
+                      {cancelled && !failed && (
+                        <button
+                          onClick={() => performSubAction(s.id, 'autopay', { enabled: true })}
+                          disabled={subBusyId === s.id}
+                          className="text-xs h-9 px-3 rounded-xl bg-neutral-900 text-white hover:bg-neutral-800 transition-colors disabled:opacity-50"
+                        >
+                          Re-enable auto-pay
+                        </button>
+                      )}
+                      {!cancelled && !failed && (
+                        <button
+                          onClick={() => {
+                            if (confirm(`Cancel your ${s.planKey} subscription? You keep access until ${periodEnd.toLocaleDateString()}.`)) {
+                              performSubAction(s.id, 'cancel');
+                            }
+                          }}
+                          disabled={subBusyId === s.id}
+                          className="text-xs h-9 px-3 rounded-xl border border-red-200 text-red-700 hover:bg-red-50 transition-colors disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {subsLoading && <p className="text-xs text-neutral-400 mt-3">Refreshing…</p>}
+            <p className="text-xs text-neutral-400 mt-4">
+              Credits drain from your oldest plan first, then newer plans, then permanent top-ups.
+            </p>
+          </div>
+        )}
+
         <div className="grid lg:grid-cols-4 md:grid-cols-2 gap-6 w-full">
           {PLAN_DEFINITIONS.map((plan, index) => {
-            const isCurrent = currentPlan === plan.key;
             const isFreePlan = plan.key === 'FREE';
-            const currentRank = PLAN_RANK[currentPlan] ?? 0;
-            const planRank = PLAN_RANK[plan.key] ?? 0;
-            const isLowerPlan = isLoggedIn && currentRank > planRank;
+            const heldCount = activeSubs.filter(s => s.planKey === plan.key && (s.status === 'ACTIVE' || s.status === 'CANCELED')).length;
 
             let ctaButton;
-            if (isCurrent) {
-              ctaButton = (
-                <div className={`w-full h-12 rounded-full font-semibold flex items-center justify-center mb-8 relative z-10 bg-green-500/20 text-green-700 border border-green-300`}>
-                  ✓ Current Plan
-                </div>
-              );
-            } else if (isLowerPlan) {
-              ctaButton = (
-                <div className="w-full h-12 rounded-full font-semibold flex items-center justify-center mb-8 relative z-10 bg-neutral-100 text-neutral-400 border border-neutral-200 cursor-not-allowed">
-                  Upgrade only
-                </div>
-              );
-            } else if (isFreePlan) {
+            if (isFreePlan) {
               ctaButton = (
                 <Link
                   href={isLoggedIn ? '/studio' : '/register'}
@@ -344,7 +379,7 @@ export default function Pricing() {
                       : 'bg-neutral-900 text-white hover:bg-neutral-800'
                   }`}
                 >
-                  {plan.cta}
+                  {heldCount > 0 ? `Buy another ${plan.name}` : plan.cta}
                 </button>
               );
             } else {
@@ -368,7 +403,7 @@ export default function Pricing() {
                 initial={{ opacity: 0, y: 24 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.45, delay: 0.1 + index * 0.05 }}
-                className={`${plan.theme} backdrop-blur-2xl border rounded-[2rem] p-7 md:p-8 shadow-[0_18px_50px_-30px_rgba(0,0,0,0.35)] hover:-translate-y-1 transition-all flex flex-col relative overflow-hidden ${isCurrent ? 'ring-2 ring-green-400/50' : ''}`}
+                className={`${plan.theme} backdrop-blur-2xl border rounded-[2rem] p-7 md:p-8 shadow-[0_18px_50px_-30px_rgba(0,0,0,0.35)] hover:-translate-y-1 transition-all flex flex-col relative overflow-hidden ${heldCount > 0 ? 'ring-2 ring-green-400/50' : ''}`}
               >
                 <div className={`absolute -top-16 -right-12 h-32 w-32 rounded-full ${plan.highlight} blur-[60px] opacity-70`} />
                 <div className="flex items-center justify-between mb-6 relative z-10">
@@ -378,9 +413,9 @@ export default function Pricing() {
                       <Sparkles className="w-3 h-3" /> Popular
                     </span>
                   )}
-                  {isCurrent && (
+                  {heldCount > 0 && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-green-500/20 text-green-700 px-2.5 py-1 text-[10px] font-semibold uppercase">
-                      <Check className="w-3 h-3" /> Active
+                      <Check className="w-3 h-3" /> {heldCount > 1 ? `${heldCount} active` : 'Active'}
                     </span>
                   )}
                 </div>
@@ -470,21 +505,15 @@ export default function Pricing() {
                       </div>
                     </div>
 
-                    {/* Dodo mode: skip the mock form, show a redirect notice.
-                        Dummy mode: keep the existing card/UPI tabs. */}
-                    {dodoEnabled ? (
-                      <div className="text-left mb-6 p-4 bg-neutral-50 border border-neutral-200 rounded-2xl">
-                        <p className="text-sm text-neutral-700 mb-2 font-medium">Secure checkout by Dodo Payments</p>
-                        <p className="text-xs text-neutral-500 leading-relaxed">
-                          You&apos;ll be redirected to a hosted checkout page to complete payment.
-                          {modal.mode === 'plan'
-                            ? ' Your plan will activate and credits will appear after payment is confirmed.'
-                            : ' Credits will appear in your account once payment is confirmed.'}
-                        </p>
-                      </div>
-                    ) : (
-                      <PaymentFormMock onFormChange={(vals) => { formValuesRef.current = vals; }} />
-                    )}
+                    <div className="text-left mb-6 p-4 bg-neutral-50 border border-neutral-200 rounded-2xl">
+                      <p className="text-sm text-neutral-700 mb-2 font-medium">Secure checkout by Dodo Payments</p>
+                      <p className="text-xs text-neutral-500 leading-relaxed">
+                        You&apos;ll be redirected to a hosted checkout page to complete payment.
+                        {modal.mode === 'plan'
+                          ? ' Your plan will activate and credits will appear after payment is confirmed.'
+                          : ' Credits will appear in your account once payment is confirmed.'}
+                      </p>
+                    </div>
 
                     <div className="flex justify-between items-center pt-4 border-t border-black/5 mb-6">
                       <span className="text-neutral-900 font-semibold">
@@ -497,16 +526,14 @@ export default function Pricing() {
 
                     <button
                       onClick={modal.mode === 'plan' ? processPlanUpgrade : processTopUp}
-                      className="w-full bg-black text-white h-14 rounded-2xl font-semibold shadow-[0_8px_20px_rgba(0,0,0,0.15)] hover:bg-neutral-800 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                      disabled={!dodoEnabled}
+                      className="w-full bg-black text-white h-14 rounded-2xl font-semibold shadow-[0_8px_20px_rgba(0,0,0,0.15)] hover:bg-neutral-800 transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {dodoEnabled
-                        ? 'Continue to secure checkout'
-                        : modal.mode === 'plan' ? `Upgrade to ${modal.planName}` : `Pay $${modal.amountUSD.toFixed(2)}`}
+                      {dodoEnabled ? 'Continue to secure checkout' : 'Payments temporarily unavailable'}
                       <ArrowRight className="w-4 h-4" />
                     </button>
                     <p className="text-xs text-neutral-400 mt-4 flex items-center gap-1 justify-center">
-                      <Sparkles className="w-3 h-3" />
-                      {dodoEnabled ? 'Powered by Dodo Payments' : 'Dummy payment mode active'}
+                      <Sparkles className="w-3 h-3" /> Powered by Dodo Payments
                     </p>
                   </>
                 )}
@@ -564,140 +591,3 @@ export default function Pricing() {
   );
 }
 
-// ─── Mock Payment Form Component ─────────────────────────────────────────────
-function PaymentFormMock({ onFormChange }: { onFormChange: (vals: { tab: 'card' | 'upi'; cardNumber: string; upiId: string }) => void }) {
-  const [tab, setTab] = useState<'card' | 'upi'>('card');
-  const [cardNumber, setCardNumber] = useState('');
-  const [upiId, setUpiId] = useState('');
-  const [bank, setBank] = useState('sbi');
-
-  // Notify parent whenever form values change
-  React.useEffect(() => {
-    onFormChange({ tab, cardNumber, upiId });
-  }, [tab, cardNumber, upiId, onFormChange]);
-
-  return (
-    <div className="text-left mb-6">
-      {/* Tab Switcher */}
-      <div className="flex gap-2 mb-5 p-1 bg-neutral-100 rounded-xl">
-        <button
-          type="button"
-          onClick={() => setTab('card')}
-          className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${
-            tab === 'card'
-              ? 'bg-white shadow-sm border border-black/5 text-neutral-900'
-              : 'text-neutral-500 hover:text-neutral-700'
-          }`}
-        >
-          Credit Card
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab('upi')}
-          className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${
-            tab === 'upi'
-              ? 'bg-white shadow-sm border border-black/5 text-neutral-900'
-              : 'text-neutral-500 hover:text-neutral-700'
-          }`}
-        >
-          UPI / Netbanking
-        </button>
-      </div>
-
-      {/* Credit Card Form */}
-      {tab === 'card' && (
-        <motion.div
-          key="card"
-          initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.18 }}
-          className="space-y-4"
-        >
-          <div>
-            <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">Cardholder Name</label>
-            <input type="text" defaultValue="John Doe" className="w-full h-11 px-4 rounded-xl border border-neutral-200 bg-neutral-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all" />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">Card Number</label>
-            <div className="relative">
-              <input
-                type="text"
-                value={cardNumber}
-                onChange={e => setCardNumber(e.target.value)}
-                placeholder="Enter card number"
-                maxLength={19}
-                className="w-full h-11 pl-10 pr-4 rounded-xl border border-neutral-200 bg-neutral-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
-              />
-              <CreditCard className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            </div>
-          </div>
-          <div className="flex gap-4">
-            <div className="flex-1">
-              <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">Expiry</label>
-              <input type="text" defaultValue="12/25" className="w-full h-11 px-4 rounded-xl border border-neutral-200 bg-neutral-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all" />
-            </div>
-            <div className="flex-1">
-              <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">CVC</label>
-              <input type="password" defaultValue="123" maxLength={3} className="w-full h-11 px-4 rounded-xl border border-neutral-200 bg-neutral-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all" />
-            </div>
-          </div>
-        </motion.div>
-      )}
-
-      {/* UPI / Netbanking Form */}
-      {tab === 'upi' && (
-        <motion.div
-          key="upi"
-          initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.18 }}
-          className="space-y-4"
-        >
-          {/* UPI ID */}
-          <div>
-            <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">UPI ID</label>
-            <div className="relative">
-              <input
-                type="text"
-                value={upiId}
-                onChange={e => setUpiId(e.target.value)}
-                placeholder="yourname@upi"
-                className="w-full h-11 px-4 rounded-xl border border-neutral-200 bg-neutral-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
-              />
-            </div>
-            <p className="text-[11px] text-neutral-400 mt-1.5">e.g. name@okicici, name@ybl, name@paytm</p>
-          </div>
-
-          {/* Netbanking Bank Picker */}
-          <div>
-            <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">Or pay via Netbanking</label>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { id: 'sbi',  label: 'SBI',   color: 'bg-blue-50 border-blue-200 text-blue-800'   },
-                { id: 'hdfc', label: 'HDFC',  color: 'bg-red-50 border-red-200 text-red-800'       },
-                { id: 'icici',label: 'ICICI', color: 'bg-orange-50 border-orange-200 text-orange-800' },
-                { id: 'axis', label: 'Axis',  color: 'bg-purple-50 border-purple-200 text-purple-800' },
-                { id: 'kotak',label: 'Kotak', color: 'bg-red-50 border-red-200 text-red-700'       },
-                { id: 'other',label: 'Other', color: 'bg-neutral-50 border-neutral-200 text-neutral-700' },
-              ].map(b => (
-                <button
-                  key={b.id}
-                  type="button"
-                  onClick={() => setBank(b.id)}
-                  className={`py-2.5 rounded-xl border text-xs font-bold transition-all ${
-                    bank === b.id
-                      ? b.color + ' ring-2 ring-offset-1 ring-orange-400/60 scale-[1.03]'
-                      : 'bg-white border-neutral-200 text-neutral-600 hover:border-orange-300'
-                  }`}
-                >
-                  {b.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-xl">
-            <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
-            <p className="text-xs text-amber-800 font-medium">Demo mode — no real transaction will occur.</p>
-          </div>
-        </motion.div>
-      )}
-    </div>
-  );
-}

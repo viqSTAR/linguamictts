@@ -18,20 +18,43 @@ const tabs = [
   { id: 'settings',  label: 'Settings',           icon: Settings },
 ];
 
+type Subscription = {
+  id: string;
+  planKey: string;
+  monthlyCredits: number;
+  creditsRemaining: number;
+  status: 'ACTIVE' | 'CANCELED' | 'ON_HOLD' | 'FAILED';
+  autoRenew: boolean;
+  currentPeriodEnd: string;
+  canceledAt: string | null;
+  createdAt: string;
+};
+
 type UserProfile = {
   name?: string;
   email?: string;
-  plan?: string;
-  planMonthlyCredits?: number;
   creditsBalance?: number;
+  addonCredits?: number;
+  freeCreditsRemaining?: number;
   lastAudioUpdatedAt?: string | null;
   lastAudioUrl?: string | null;
   lastAudioMp3Url?: string | null;
   presets?: { name: string; voice: string; tone: string; speed: number; temperature: number }[];
-  subscriptionStatus?: 'NONE' | 'ACTIVE' | 'CANCELED';
-  currentPeriodEnd?: string | null;
-  autoRenew?: boolean;
-  canceledAt?: string | null;
+  subscriptions?: Subscription[];
+};
+
+const PLAN_RANK: Record<string, number> = { FREE: 0, STARTER: 1, CREATOR: 2, PRO: 3 };
+const FREE_MONTHLY_CREDITS = 10000;
+
+// Pick a primary plan for theming the hero — the highest-ranked active sub,
+// or FREE if the user has none.
+const primaryPlanFromSubs = (subs?: Subscription[]): string => {
+  if (!subs || subs.length === 0) return 'FREE';
+  const ranked = subs
+    .filter(s => s.status === 'ACTIVE' || s.status === 'CANCELED')
+    .map(s => ({ key: s.planKey, rank: PLAN_RANK[s.planKey] ?? 0 }))
+    .sort((a, b) => b.rank - a.rank);
+  return ranked.length > 0 ? ranked[0].key : 'FREE';
 };
 
 type CreditTransaction = {
@@ -1493,29 +1516,29 @@ const PLAN_THEMES: Record<string, {
 };
 
 function BillingView({ user, setUser }: { user: UserProfile | null; setUser: React.Dispatch<React.SetStateAction<UserProfile | null>> }) {
-  const planKey            = (user?.plan || 'FREE').toString().toLowerCase();
-  const theme              = PLAN_THEMES[planKey] || PLAN_THEMES.free;
-  const monthlyAllocation  = user?.planMonthlyCredits || 10000;
-  const balance            = user?.creditsBalance || 0;
-  const usedFromMonthly    = Math.max(0, monthlyAllocation - balance);
-  const percent            = Math.min(100, Math.max(0, (usedFromMonthly / monthlyAllocation) * 100));
-  const hasTopUpSurplus    = balance > monthlyAllocation;
-  const isPro              = theme.isPro === true;
-
-  // Subscription state — FREE plans can't manage anything. Auto-pay toggle and
-  // cancel/resume buttons are gated on this.
-  const isFreePlan         = (user?.plan || 'FREE') === 'FREE';
-  const subStatus          = user?.subscriptionStatus || 'NONE';
-  const autoRenew          = user?.autoRenew === true;
-  const isCanceled         = subStatus === 'CANCELED' || (!isFreePlan && !autoRenew);
-  const periodEnd          = user?.currentPeriodEnd ? new Date(user.currentPeriodEnd) : null;
-  const periodEndLabel     = periodEnd ? periodEnd.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : null;
+  const subs = user?.subscriptions || [];
+  const activeSubs = subs.filter(s => s.status === 'ACTIVE' || s.status === 'CANCELED' || s.status === 'ON_HOLD');
+  const primaryPlan = primaryPlanFromSubs(subs);
+  const planKey = primaryPlan.toLowerCase();
+  const theme = PLAN_THEMES[planKey] || PLAN_THEMES.free;
+  // Total monthly allocation = sum of every active sub's allowance + free
+  // tier. This is the denominator for the usage progress bar — when the user
+  // stacks STARTER + PRO, the bar tracks 905k total instead of either alone.
+  const subsAllocation = activeSubs.reduce((acc, s) => acc + s.monthlyCredits, 0);
+  const monthlyAllocation = FREE_MONTHLY_CREDITS + subsAllocation;
+  const balance = user?.creditsBalance || 0;
+  const usedFromMonthly = Math.max(0, monthlyAllocation - balance);
+  const percent = Math.min(100, Math.max(0, (usedFromMonthly / monthlyAllocation) * 100));
+  const hasTopUpSurplus = balance > monthlyAllocation;
+  const isPro = theme.isPro === true;
+  const isFreeOnly = activeSubs.length === 0;
 
   const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
   const [txLoading, setTxLoading] = useState(true);
-  const [subBusy, setSubBusy] = useState(false);
+  const [subBusyId, setSubBusyId] = useState<string | null>(null);
   const [subError, setSubError] = useState<string | null>(null);
   const [refundModal, setRefundModal] = useState<RefundModalState>({ open: false, step: 'confirm' });
+  const [cancelTargetId, setCancelTargetId] = useState<string | null>(null);
 
   const refreshUser = async () => {
     try {
@@ -1526,51 +1549,32 @@ function BillingView({ user, setUser }: { user: UserProfile | null; setUser: Rea
     }
   };
 
-  const toggleAutoPay = async (next: boolean) => {
-    if (isFreePlan) return;
-    setSubBusy(true);
+  const performSubAction = async (
+    subId: string,
+    action: 'cancel' | 'resume' | 'autopay',
+    body?: object,
+  ): Promise<boolean> => {
+    setSubBusyId(subId);
     setSubError(null);
     try {
-      await api.post('/billing/subscription/autopay', { enabled: next });
+      await api.post(`/billing/subscriptions/${subId}/${action}`, body);
       await refreshUser();
+      return true;
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to update auto-pay';
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Action failed';
       setSubError(msg);
+      return false;
     } finally {
-      setSubBusy(false);
+      setSubBusyId(null);
     }
   };
 
   const confirmCancel = async () => {
-    if (isFreePlan) return;
-    setSubBusy(true);
-    setSubError(null);
-    try {
-      await api.post('/billing/subscription/cancel');
-      await refreshUser();
-      setRefundModal({ open: true, step: 'submitted' });
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to cancel subscription';
-      setSubError(msg);
-      setRefundModal({ open: false, step: 'confirm' });
-    } finally {
-      setSubBusy(false);
-    }
-  };
-
-  const resumeSubscription = async () => {
-    if (isFreePlan) return;
-    setSubBusy(true);
-    setSubError(null);
-    try {
-      await api.post('/billing/subscription/resume');
-      await refreshUser();
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to resume subscription';
-      setSubError(msg);
-    } finally {
-      setSubBusy(false);
-    }
+    if (!cancelTargetId) return;
+    const ok = await performSubAction(cancelTargetId, 'cancel');
+    if (ok) setRefundModal({ open: true, step: 'submitted' });
+    else setRefundModal({ open: false, step: 'confirm' });
+    setCancelTargetId(null);
   };
 
   useEffect(() => {
@@ -1737,11 +1741,11 @@ function BillingView({ user, setUser }: { user: UserProfile | null; setUser: Rea
         initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
         className={`mt-6 rounded-2xl border p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ${theme.usageCardBg} ${theme.usageCardBorder}`}
       >
-        {isFreePlan ? (
+        {isFreeOnly ? (
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6 p-4 rounded-2xl border border-dashed border-neutral-200 bg-neutral-50">
             <div>
-              <div className={`text-[11px] font-bold uppercase tracking-widest ${theme.usageAccent}`}>Subscription</div>
-              <p className={`text-sm ${theme.usageSub}`}>You&apos;re on the FREE plan. Upgrade to enable auto-pay and subscription management.</p>
+              <div className={`text-[11px] font-bold uppercase tracking-widest ${theme.usageAccent}`}>Subscriptions</div>
+              <p className={`text-sm ${theme.usageSub}`}>You&apos;re on the FREE plan. Add any paid plan to start stacking credits.</p>
             </div>
             <Link
               href="/pricing"
@@ -1751,70 +1755,92 @@ function BillingView({ user, setUser }: { user: UserProfile | null; setUser: Rea
             </Link>
           </div>
         ) : (
-          <>
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
-              <div>
-                <div className={`text-[11px] font-bold uppercase tracking-widest ${theme.usageAccent}`}>Auto-Pay</div>
-                <p className={`text-sm ${theme.usageSub}`}>
-                  {autoRenew
-                    ? (periodEndLabel ? `Renews on ${periodEndLabel}.` : 'Auto-renews monthly.')
-                    : (periodEndLabel ? `Auto-pay off — plan ends ${periodEndLabel}.` : 'Auto-pay is off.')}
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled={subBusy}
-                onClick={() => toggleAutoPay(!autoRenew)}
-                className={`h-11 px-4 rounded-full font-semibold text-sm border transition-all disabled:opacity-50 disabled:cursor-wait ${
-                  autoRenew
-                    ? 'bg-orange-500 text-white border-orange-500 hover:bg-orange-600'
-                    : 'bg-neutral-100 text-neutral-500 border-neutral-200 hover:bg-neutral-200'
-                }`}
-              >
-                {autoRenew ? 'Auto-Pay On' : 'Auto-Pay Off'}
-              </button>
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <div className={`text-[11px] font-bold uppercase tracking-widest ${theme.usageAccent}`}>Your plans</div>
+              <Link href="/pricing" className={`text-xs font-semibold ${theme.usageAccent} hover:underline`}>
+                + Add another
+              </Link>
             </div>
+            <p className={`text-xs ${theme.usageSub} mb-4`}>
+              Credits drain from your oldest plan first, then newer plans, then permanent top-ups.
+            </p>
 
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
-              <div>
-                <div className={`text-[11px] font-bold uppercase tracking-widest ${theme.usageAccent}`}>
-                  {isCanceled ? 'Subscription Cancelled' : 'Cancel Subscription'}
-                </div>
-                <p className={`text-sm ${theme.usageSub}`}>
-                  {isCanceled
-                    ? (periodEndLabel
-                        ? `Access continues until ${periodEndLabel}, then your account reverts to FREE.`
-                        : 'Your subscription is cancelled.')
-                    : 'Cancel your subscription renewal at the end of the billing cycle.'}
-                </p>
-              </div>
-              {isCanceled ? (
-                <button
-                  type="button"
-                  disabled={subBusy}
-                  onClick={resumeSubscription}
-                  className="h-11 px-4 rounded-full font-semibold text-sm bg-emerald-500 text-white hover:bg-emerald-600 transition-all disabled:opacity-50 disabled:cursor-wait"
-                >
-                  Resume Subscription
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  disabled={subBusy}
-                  onClick={() => setRefundModal({ open: true, step: 'confirm' })}
-                  className="h-11 px-4 rounded-full font-semibold text-sm border border-red-200 text-red-600 hover:bg-red-50 transition-all disabled:opacity-50 disabled:cursor-wait"
-                >
-                  Cancel Subscription
-                </button>
-              )}
+            <div className="space-y-3">
+              {activeSubs.map((s, idx) => {
+                const periodEnd = new Date(s.currentPeriodEnd);
+                const periodEndLabel = periodEnd.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+                const isCanceled = s.status === 'CANCELED' || s.autoRenew === false;
+                const onHold = s.status === 'ON_HOLD';
+                const busy = subBusyId === s.id;
+
+                return (
+                  <div key={s.id} className={`rounded-2xl border p-4 ${theme.trackBg} ${theme.usageCardBorder}`}>
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className={`font-semibold ${theme.usageText}`}>{s.planKey}</span>
+                          <span className={`text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full ${
+                            onHold ? 'bg-amber-100 text-amber-800' :
+                            isCanceled ? 'bg-neutral-200 text-neutral-700' :
+                            'bg-green-100 text-green-700'
+                          }`}>
+                            {onHold ? 'On hold' : isCanceled ? 'Auto-pay off' : 'Active'}
+                          </span>
+                        </div>
+                        <p className={`text-xs mt-0.5 ${theme.usageSub}`}>
+                          {s.creditsRemaining.toLocaleString()} / {s.monthlyCredits.toLocaleString()} credits
+                          {' · '}
+                          {isCanceled ? 'Ends' : 'Renews'} {periodEndLabel}
+                          {' · '}
+                          Drain order #{idx + 1}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {!isCanceled && !onHold && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => performSubAction(s.id, 'autopay', { enabled: false })}
+                          className="h-9 px-3 rounded-full text-xs font-semibold bg-orange-500 text-white border border-orange-500 hover:bg-orange-600 transition-all disabled:opacity-50"
+                        >
+                          Auto-Pay On
+                        </button>
+                      )}
+                      {(isCanceled || onHold) && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => performSubAction(s.id, 'autopay', { enabled: true })}
+                          className="h-9 px-3 rounded-full text-xs font-semibold bg-neutral-900 text-white hover:bg-neutral-800 transition-all disabled:opacity-50"
+                        >
+                          Re-enable Auto-Pay
+                        </button>
+                      )}
+                      {!isCanceled && !onHold && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => { setCancelTargetId(s.id); setRefundModal({ open: true, step: 'confirm' }); }}
+                          className="h-9 px-3 rounded-full text-xs font-semibold border border-red-200 text-red-600 hover:bg-red-50 transition-all disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
             {subError && (
-              <div className="mb-6 px-4 py-3 rounded-xl text-sm font-medium border border-red-200 bg-red-50 text-red-700">
+              <div className="mt-4 px-4 py-3 rounded-xl text-sm font-medium border border-red-200 bg-red-50 text-red-700">
                 {subError}
               </div>
             )}
-          </>
+          </div>
         )}
 
         <div className="h-px w-full bg-black/5 mb-6" />
@@ -1880,18 +1906,18 @@ function BillingView({ user, setUser }: { user: UserProfile | null; setUser: Rea
                   <div className="flex gap-3">
                     <button
                       type="button"
-                      onClick={() => setRefundModal({ open: false, step: 'confirm' })}
+                      onClick={() => { setCancelTargetId(null); setRefundModal({ open: false, step: 'confirm' }); }}
                       className="flex-1 py-3 rounded-2xl border border-black/10 text-sm font-semibold text-neutral-600 hover:bg-neutral-50 transition-all"
                     >
                       Keep subscription
                     </button>
                     <button
                       type="button"
-                      disabled={subBusy}
+                      disabled={subBusyId !== null}
                       onClick={confirmCancel}
                       className="flex-1 py-3 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-500 text-white text-sm font-semibold shadow-[0_6px_18px_rgba(249,115,22,0.3)] transition-all disabled:opacity-50 disabled:cursor-wait"
                     >
-                      {subBusy ? 'Cancelling…' : 'Confirm cancellation'}
+                      {subBusyId !== null ? 'Cancelling…' : 'Confirm cancellation'}
                     </button>
                   </div>
                 </>
@@ -1903,13 +1929,11 @@ function BillingView({ user, setUser }: { user: UserProfile | null; setUser: Rea
                     </div>
                     <div>
                       <h4 className="font-bold text-neutral-900">Subscription cancelled</h4>
-                      <p className="text-xs text-neutral-400">Auto-pay is off.</p>
+                      <p className="text-xs text-neutral-400">Auto-pay is off for this plan. Other plans keep running.</p>
                     </div>
                   </div>
                   <p className="text-sm text-neutral-600 mb-6">
-                    {periodEndLabel
-                      ? `You keep full access until ${periodEndLabel}. After that your account reverts to the FREE plan. You can resume any time before then.`
-                      : 'You keep access until the end of your billing period. After that your account reverts to the FREE plan.'}
+                    You keep full access until this plan&apos;s period end. You can re-enable auto-pay from your subscriptions list any time before then.
                   </p>
                   <button
                     type="button"

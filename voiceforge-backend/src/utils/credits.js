@@ -1,7 +1,7 @@
 const prisma = require('./prisma');
 
-const FIRST_MONTH_CREDITS = 12000;
-const DEFAULT_MONTHLY_CREDITS = 10000;
+const FIRST_MONTH_FREE_CREDITS = 12000;
+const FREE_MONTHLY_CREDITS = 10000;
 
 const getMonthKey = (date) => {
   const year = date.getUTCFullYear();
@@ -10,7 +10,7 @@ const getMonthKey = (date) => {
 };
 
 // First moment of the next calendar month in UTC. Used as the next
-// `currentPeriodEnd` when a subscription renews or is created.
+// `currentPeriodEnd` when a subscription renews or is first activated.
 const endOfCurrentMonthUtc = (now = new Date()) => {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0, 0));
 };
@@ -40,9 +40,16 @@ const computeSttCredits = (durationSeconds) => {
 };
 
 /**
- * Atomic credit reservation. Uses a conditional UPDATE so two concurrent
- * requests cannot both pass a stale balance check. Returns the new balance
- * on success, or {ok:false} if the user lacks the funds.
+ * reserveCredits — atomic FIFO drain across all credit sources for a user.
+ *
+ * Drain order:
+ *   1. Free monthly bucket          (User.freeCreditsRemaining)
+ *   2. Subscriptions, oldest first  (Subscription.creditsRemaining, ACTIVE/CANCELED)
+ *   3. Addon top-ups, oldest first  (AddonGrant.creditsRemaining)
+ *
+ * The cached User.creditsBalance is the sum of all three pools and is updated
+ * inside the same transaction. Returns the new balance on success, or
+ * { ok: false } when the user can't afford the request.
  */
 const reserveCredits = async (userId, amount) => {
   if (!amount || amount <= 0) {
@@ -53,32 +60,156 @@ const reserveCredits = async (userId, amount) => {
     return { ok: true, balance: user ? user.creditsBalance : 0 };
   }
 
-  const result = await prisma.user.updateMany({
-    where: { id: userId, creditsBalance: { gte: amount } },
-    data: { creditsBalance: { decrement: amount } },
-  });
-
-  if (result.count === 0) {
-    const user = await prisma.user.findUnique({
+  return prisma.$transaction(async (tx) => {
+    // Cheap pre-check on the cached total. The walk below would also catch
+    // insufficient funds, but a single read here avoids touching per-bucket
+    // rows when the user has nothing.
+    const user = await tx.user.findUnique({
       where: { id: userId },
+      select: {
+        creditsBalance: true,
+        freeCreditsRemaining: true,
+      },
+    });
+    if (!user || user.creditsBalance < amount) {
+      return { ok: false, balance: user ? user.creditsBalance : 0 };
+    }
+
+    let remaining = amount;
+    let addonDrained = 0;
+
+    // 1. Free monthly bucket
+    if (remaining > 0 && user.freeCreditsRemaining > 0) {
+      const take = Math.min(remaining, user.freeCreditsRemaining);
+      await tx.user.update({
+        where: { id: userId },
+        data: { freeCreditsRemaining: { decrement: take } },
+      });
+      remaining -= take;
+    }
+
+    // 2. Subscriptions in FIFO order. CANCELED subs still have credits until
+    //    their period ends — they participate in the drain just like ACTIVE.
+    if (remaining > 0) {
+      const subs = await tx.subscription.findMany({
+        where: {
+          userId,
+          status: { in: ['ACTIVE', 'CANCELED'] },
+          creditsRemaining: { gt: 0 },
+        },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, creditsRemaining: true },
+      });
+      for (const sub of subs) {
+        if (remaining <= 0) break;
+        const take = Math.min(remaining, sub.creditsRemaining);
+        await tx.subscription.update({
+          where: { id: sub.id },
+          data: { creditsRemaining: { decrement: take } },
+        });
+        remaining -= take;
+      }
+    }
+
+    // 3. Addon top-ups in FIFO order
+    if (remaining > 0) {
+      const grants = await tx.addonGrant.findMany({
+        where: { userId, creditsRemaining: { gt: 0 } },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, creditsRemaining: true },
+      });
+      for (const g of grants) {
+        if (remaining <= 0) break;
+        const take = Math.min(remaining, g.creditsRemaining);
+        await tx.addonGrant.update({
+          where: { id: g.id },
+          data: { creditsRemaining: { decrement: take } },
+        });
+        remaining -= take;
+        addonDrained += take;
+      }
+    }
+
+    if (remaining > 0) {
+      // Cached balance said we had enough but the buckets disagree — schema
+      // drift. Throw to roll back so nothing is decremented.
+      throw new Error(`Credit drift: cached balance ${user.creditsBalance} but bucket sum < ${amount} for user ${userId}`);
+    }
+
+    const updated = await tx.user.update({
+      where: { id: userId },
+      data: {
+        creditsBalance: { decrement: amount },
+        ...(addonDrained > 0 ? { addonCredits: { decrement: addonDrained } } : {}),
+      },
       select: { creditsBalance: true },
     });
-    return { ok: false, balance: user ? user.creditsBalance : 0 };
-  }
 
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { creditsBalance: true },
+    return { ok: true, balance: updated.creditsBalance };
   });
-  return { ok: true, balance: user.creditsBalance };
 };
 
+/**
+ * refundCredits — return credits to the youngest available bucket.
+ *
+ * Strategy: prefer the bucket with the longest remaining lifetime so the
+ * user is never penalised by a reserve→refund cycle. Order:
+ *   1. Youngest addon grant   (permanent — best for the user)
+ *   2. Youngest active sub    (lives until next period boundary)
+ *   3. Free monthly bucket    (resets next month)
+ *
+ * Total creditsBalance is always restored regardless of where the refund
+ * lands. Failures throw — callers must handle them (no silent swallow).
+ */
 const refundCredits = async (userId, amount) => {
   if (!amount || amount <= 0) return;
-  await prisma.user.update({
-    where: { id: userId },
-    data: { creditsBalance: { increment: amount } },
-  }).catch((err) => console.error('Refund failed:', err.message));
+
+  await prisma.$transaction(async (tx) => {
+    const addon = await tx.addonGrant.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    if (addon) {
+      await tx.addonGrant.update({
+        where: { id: addon.id },
+        data: { creditsRemaining: { increment: amount } },
+      });
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          creditsBalance: { increment: amount },
+          addonCredits: { increment: amount },
+        },
+      });
+      return;
+    }
+
+    const sub = await tx.subscription.findFirst({
+      where: { userId, status: { in: ['ACTIVE', 'CANCELED'] } },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    if (sub) {
+      await tx.subscription.update({
+        where: { id: sub.id },
+        data: { creditsRemaining: { increment: amount } },
+      });
+      await tx.user.update({
+        where: { id: userId },
+        data: { creditsBalance: { increment: amount } },
+      });
+      return;
+    }
+
+    await tx.user.update({
+      where: { id: userId },
+      data: {
+        freeCreditsRemaining: { increment: amount },
+        creditsBalance: { increment: amount },
+      },
+    });
+  });
 };
 
 const logUsage = async ({ userId, apiKeyId, endpointType, charsCount, emotionTagsCount, toneUsed, creditsDeducted }) => {
@@ -100,115 +231,95 @@ const logUsage = async ({ userId, apiKeyId, endpointType, charsCount, emotionTag
 };
 
 /**
- * ensureMonthlyCredits — called on every authenticated request.
+ * ensureMonthlyCredits — runs once per calendar month per user.
  *
- * Rules:
- *  1. Runs at most once per calendar month (idempotent via MONTHLY_RESET log).
- *  2. Addon credits (addonCredits field) are PERMANENT — never touched here.
- *  3. Monthly reset = set plan credits to the monthly allocation.
- *     Formula: target = planMonthlyCredits + addonCredits
- *     Add-on credits are permanent. Plan credits do not carry forward.
+ * In the multi-subscription world, Dodo's webhooks own paid-plan renewals
+ * (subscription.renewed grants the next month's credits). This function's
+ * remaining job is:
+ *   1. Reset the per-user free monthly bucket on month rollover.
+ *   2. Expire any CANCELED subscription whose period has ended (Dodo's
+ *      subscription.expired webhook usually handles this — we do it
+ *      defensively in case that event was missed).
+ *
+ * Idempotent: it keys off (userId, MONTHLY_RESET, monthKey) so concurrent
+ * requests in the same month no-op cleanly.
  */
 const ensureMonthlyCredits = async (userId) => {
-  const monthKey = getMonthKey(new Date());
+  const now = new Date();
+  const monthKey = getMonthKey(now);
 
   try {
-    const result = await prisma.$transaction(async (tx) => {
-      // Already processed this month?
+    return await prisma.$transaction(async (tx) => {
       const existing = await tx.creditTransaction.findFirst({
         where: { userId, type: 'MONTHLY_RESET', referenceId: monthKey },
         select: { id: true },
       });
-      if (existing) return null;
+      if (existing) {
+        const u = await tx.user.findUnique({
+          where: { id: userId },
+          select: { creditsBalance: true },
+        });
+        return u ? u.creditsBalance : null;
+      }
 
       const user = await tx.user.findUnique({
         where: { id: userId },
         select: {
           creditsBalance: true,
-          planMonthlyCredits: true,
-          addonCredits: true,
-          plan: true,
+          freeCreditsRemaining: true,
+          freeMonthKey: true,
           createdAt: true,
-          subscriptionStatus: true,
-          currentPeriodEnd: true,
-          autoRenew: true,
         },
       });
       if (!user) return null;
 
-      const now = new Date();
+      let balanceDelta = 0;
+
+      // 1. Free monthly bucket reset. First month after signup gets the
+      //    bonus allowance; every month after gets the standard amount.
       const isFirstMonth =
         user.createdAt &&
         user.createdAt.getUTCFullYear() === now.getUTCFullYear() &&
         user.createdAt.getUTCMonth() === now.getUTCMonth();
+      const freeAllowance = isFirstMonth ? FIRST_MONTH_FREE_CREDITS : FREE_MONTHLY_CREDITS;
+      const freeDelta = freeAllowance - user.freeCreditsRemaining;
+      balanceDelta += freeDelta;
 
-      const addonCredits = user.addonCredits ?? 0;
-
-      // ── Subscription lifecycle on month rollover ──────────────────────────
-      // If the user is on a paid plan and the period has ended:
-      //   • autoRenew=true   → renew the subscription (extend currentPeriodEnd)
-      //   • autoRenew=false  → downgrade to FREE (plan credits reset to free tier)
-      // FREE users skip this branch entirely.
-      const periodOver = user.currentPeriodEnd && user.currentPeriodEnd <= now;
-      const isPaidPlan = user.plan && user.plan !== 'FREE';
-
-      let effectivePlan = user.plan;
-      let effectivePlanAllocation = user.planMonthlyCredits || DEFAULT_MONTHLY_CREDITS;
-      const subscriptionUpdate = {};
-
-      if (isPaidPlan && periodOver) {
-        if (user.autoRenew && user.subscriptionStatus === 'ACTIVE') {
-          // Auto-renew: keep plan, push period end by one calendar month.
-          // In dummy/mock mode this is free; once Dodo lands, this is where
-          // the renewal charge would happen (and on failure we'd downgrade).
-          subscriptionUpdate.currentPeriodEnd = endOfCurrentMonthUtc(now);
-        } else {
-          // Subscription was cancelled or auto-pay was off — downgrade now.
-          effectivePlan = 'FREE';
-          effectivePlanAllocation = DEFAULT_MONTHLY_CREDITS;
-          subscriptionUpdate.plan = 'FREE';
-          subscriptionUpdate.planMonthlyCredits = DEFAULT_MONTHLY_CREDITS;
-          subscriptionUpdate.subscriptionStatus = 'NONE';
-          subscriptionUpdate.autoRenew = false;
-          subscriptionUpdate.currentPeriodEnd = null;
-        }
-      }
-
-      // Plan credit allocation for this month
-      let planAllocation = effectivePlanAllocation;
-      if (effectivePlan === 'FREE' && isFirstMonth) {
-        planAllocation = FIRST_MONTH_CREDITS;
-      }
-
-      // Reset plan credits to the monthly allocation, preserving add-on credits.
-      const targetBalance = planAllocation + addonCredits;
-      const delta = targetBalance - user.creditsBalance;
-
-      let updatedBalance = user.creditsBalance;
-
-      const userUpdateData = { ...subscriptionUpdate };
-      if (delta !== 0) {
-        userUpdateData.creditsBalance = targetBalance;
-      }
-      if (Object.keys(userUpdateData).length > 0) {
-        const updatedUser = await tx.user.update({
-          where: { id: userId },
-          data: userUpdateData,
+      // 2. Expire CANCELED subs whose period has lapsed. Webhook usually
+      //    beats us to it; this is the safety net.
+      const stale = await tx.subscription.findMany({
+        where: {
+          userId,
+          status: 'CANCELED',
+          currentPeriodEnd: { lte: now },
+        },
+        select: { id: true, creditsRemaining: true },
+      });
+      for (const sub of stale) {
+        balanceDelta -= sub.creditsRemaining;
+        await tx.subscription.update({
+          where: { id: sub.id },
+          data: { status: 'EXPIRED', creditsRemaining: 0 },
         });
-        updatedBalance = updatedUser.creditsBalance;
       }
 
-      // Log the reset (even if delta=0) to mark this month as processed.
-      // Wrap in try/catch so a race between two requests doesn't 500 — the
-      // (userId, type, referenceId) unique constraint guarantees exactly one
-      // reset per month.
+      const newBalance = Math.max(0, user.creditsBalance + balanceDelta);
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          freeCreditsRemaining: freeAllowance,
+          freeMonthKey: monthKey,
+          creditsBalance: newBalance,
+        },
+      });
+
       try {
         await tx.creditTransaction.create({
           data: {
             userId,
-            amount: delta,
+            amount: balanceDelta,
             type: 'MONTHLY_RESET',
-            description: `Monthly plan reset ${monthKey} — ${planAllocation.toLocaleString()} plan credits + ${addonCredits.toLocaleString()} permanent add-ons${subscriptionUpdate.plan === 'FREE' ? ' (subscription cancelled, downgraded to FREE)' : ''}`,
+            description: `Monthly free reset ${monthKey} — ${freeAllowance.toLocaleString()} free credits${stale.length > 0 ? ` (expired ${stale.length} cancelled plan${stale.length > 1 ? 's' : ''})` : ''}`,
             referenceId: monthKey,
           },
         });
@@ -216,10 +327,8 @@ const ensureMonthlyCredits = async (userId) => {
         if (logErr && logErr.code !== 'P2002') throw logErr;
       }
 
-      return updatedBalance;
+      return newBalance;
     });
-
-    return result;
   } catch (error) {
     console.error('Monthly credit reset error:', error);
     return null;
@@ -227,8 +336,8 @@ const ensureMonthlyCredits = async (userId) => {
 };
 
 module.exports = {
-  FIRST_MONTH_CREDITS,
-  DEFAULT_MONTHLY_CREDITS,
+  FIRST_MONTH_FREE_CREDITS,
+  FREE_MONTHLY_CREDITS,
   getMonthKey,
   endOfCurrentMonthUtc,
   ensureMonthlyCredits,

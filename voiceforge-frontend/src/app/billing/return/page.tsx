@@ -42,11 +42,21 @@ function ReturnLoading() {
   );
 }
 
+type ApiUser = {
+  creditsBalance: number;
+  subscriptions?: Array<{ id: string; planKey: string; status: string }>;
+};
+
+const activeSubCount = (u: ApiUser): number =>
+  Array.isArray(u.subscriptions)
+    ? u.subscriptions.filter(s => s.status === 'ACTIVE' || s.status === 'CANCELED' || s.status === 'ON_HOLD').length
+    : 0;
+
 function BillingReturn() {
   const searchParams = useSearchParams();
   const kind = searchParams.get('kind'); // 'topup' | 'plan' | null
   const [phase, setPhase] = useState<Phase>('waiting');
-  const [plan, setPlan] = useState<string>('');
+  const [latestPlanKey, setLatestPlanKey] = useState<string>('');
   const [balance, setBalance] = useState<number | null>(null);
 
   useEffect(() => {
@@ -60,12 +70,11 @@ function BillingReturn() {
     // CANNOT snapshot on the first poll here because Dodo's webhook usually
     // fires before this page mounts — the first /auth/me already returns the
     // post-payment state, so a self-snapshot would never observe a "change".
-    let pre: { plan?: string; balance?: number; ts?: number } | null = null;
+    let pre: { balance?: number; subCount?: number; ts?: number } | null = null;
     try {
       const raw = sessionStorage.getItem('dodo_pre_checkout');
       if (raw) {
         const parsed = JSON.parse(raw);
-        // Stale snapshots (>30min) are likely from an abandoned session.
         if (parsed && typeof parsed.ts === 'number' && Date.now() - parsed.ts < 30 * 60 * 1000) {
           pre = parsed;
         }
@@ -75,22 +84,22 @@ function BillingReturn() {
     let cancelled = false;
     let polls = 0;
 
-    const fetchMe = () =>
+    const fetchMe = (): Promise<{ user?: ApiUser } | null> =>
       fetch(`${API_URL}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
         .then(r => r.json())
         .catch(() => null);
 
-    // Success conditions — chosen so they don't depend on a perfect pre-snapshot:
-    //   plan kind  → user is on a paid plan with an ACTIVE subscription.
-    //                The checkout endpoint refuses upgrades from existing paid
-    //                subs, so FREE→paid is the only path → this is unambiguous.
-    //   topup kind → balance strictly greater than the pre-checkout snapshot.
-    //                If no snapshot exists (cleared cache, etc.), we accept any
-    //                ACTIVE state for plan; for topup we fall back to "balance
-    //                grew vs the first poll we observed" with a small grace.
-    const isSuccess = (u: { plan: string; creditsBalance: number; subscriptionStatus?: string; dodoSubscriptionId?: string | null }, firstSeenBalance: number | null): boolean => {
+    // Success conditions:
+    //   plan  → subscription count grew vs. pre-checkout snapshot (any new
+    //           sub means the activation webhook landed). If no snapshot,
+    //           fall back to "at least one active sub exists".
+    //   topup → balance strictly greater than the pre-checkout snapshot
+    //           (or first poll if no snapshot).
+    const isSuccess = (u: ApiUser, firstSeenBalance: number | null, firstSeenSubCount: number): boolean => {
       if (kind === 'plan') {
-        return u.plan !== 'FREE' && u.subscriptionStatus === 'ACTIVE';
+        const now = activeSubCount(u);
+        if (pre && typeof pre.subCount === 'number') return now > pre.subCount;
+        return now > firstSeenSubCount;
       }
       if (kind === 'topup') {
         if (pre && typeof pre.balance === 'number') return u.creditsBalance > pre.balance;
@@ -101,6 +110,7 @@ function BillingReturn() {
     };
 
     let firstSeenBalance: number | null = null;
+    let firstSeenSubCount = 0;
 
     const tick = async () => {
       if (cancelled) return;
@@ -113,10 +123,18 @@ function BillingReturn() {
         else setTimeout(tick, POLL_INTERVAL_MS);
         return;
       }
-      if (firstSeenBalance === null) firstSeenBalance = u.creditsBalance;
+      if (firstSeenBalance === null) {
+        firstSeenBalance = u.creditsBalance;
+        firstSeenSubCount = activeSubCount(u);
+      }
 
-      if (isSuccess(u, firstSeenBalance)) {
-        setPlan(u.plan);
+      if (isSuccess(u, firstSeenBalance, firstSeenSubCount)) {
+        // For the plan flow, surface the newest sub's planKey in the success
+        // copy ("You're now on PRO"). Newest = highest createdAt by index.
+        if (kind === 'plan' && Array.isArray(u.subscriptions) && u.subscriptions.length > 0) {
+          const newest = u.subscriptions[u.subscriptions.length - 1];
+          setLatestPlanKey(newest.planKey);
+        }
         setBalance(u.creditsBalance);
         setPhase('success');
         try { sessionStorage.removeItem('dodo_pre_checkout'); } catch { /* ignore */ }
@@ -124,7 +142,6 @@ function BillingReturn() {
       }
       polls += 1;
       if (polls >= MAX_POLLS) {
-        setPlan(u.plan);
         setBalance(u.creditsBalance);
         setPhase('timeout');
       } else {
@@ -163,7 +180,7 @@ function BillingReturn() {
               </h1>
               <p className="text-neutral-500 mb-6 max-w-md">
                 {kind === 'plan'
-                  ? `You're now on the ${plan} plan. Your credits are ready to use.`
+                  ? `Your ${latestPlanKey || 'new'} plan is active. Credits are stacked on top of any existing plans.`
                   : 'Your add-on credits have been added to your account.'}
               </p>
               {balance !== null && (

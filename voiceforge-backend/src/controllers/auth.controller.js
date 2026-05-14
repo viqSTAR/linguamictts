@@ -168,6 +168,18 @@ const getMe = async (req, res) => {
             createdAt: true,
           },
         },
+        addonGrants: {
+          // Surface every top-up the user has purchased — even fully drained
+          // ones (creditsRemaining=0) so they have a record of their history.
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            amountUSD: true,
+            originalAmount: true,
+            creditsRemaining: true,
+            createdAt: true,
+          },
+        },
       },
     });
 

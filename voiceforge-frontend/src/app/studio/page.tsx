@@ -30,6 +30,14 @@ type Subscription = {
   createdAt: string;
 };
 
+type AddonGrant = {
+  id: string;
+  amountUSD: number;
+  originalAmount: number;
+  creditsRemaining: number;
+  createdAt: string;
+};
+
 type UserProfile = {
   name?: string;
   email?: string;
@@ -41,9 +49,11 @@ type UserProfile = {
   lastAudioMp3Url?: string | null;
   presets?: { name: string; voice: string; tone: string; speed: number; temperature: number }[];
   subscriptions?: Subscription[];
+  addonGrants?: AddonGrant[];
 };
 
 const PLAN_RANK: Record<string, number> = { FREE: 0, STARTER: 1, CREATOR: 2, PRO: 3 };
+const PLAN_PRICES: Record<string, string> = { STARTER: '$4.99', CREATOR: '$18.99', PRO: '$79.99' };
 const FREE_MONTHLY_CREDITS = 10000;
 
 // Pick a primary plan for theming the hero — the highest-ranked active sub,
@@ -1770,9 +1780,15 @@ function BillingView({ user, setUser }: { user: UserProfile | null; setUser: Rea
               {activeSubs.map((s, idx) => {
                 const periodEnd = new Date(s.currentPeriodEnd);
                 const periodEndLabel = periodEnd.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+                const purchasedOn = new Date(s.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
                 const isCanceled = s.status === 'CANCELED' || s.autoRenew === false;
                 const onHold = s.status === 'ON_HOLD';
                 const busy = subBusyId === s.id;
+                const usedThisPeriod = Math.max(0, s.monthlyCredits - s.creditsRemaining);
+                const usedPercent = s.monthlyCredits > 0
+                  ? Math.min(100, Math.max(0, (usedThisPeriod / s.monthlyCredits) * 100))
+                  : 0;
+                const price = PLAN_PRICES[s.planKey] || '—';
 
                 return (
                   <div key={s.id} className={`rounded-2xl border p-4 ${theme.trackBg} ${theme.usageCardBorder}`}>
@@ -1787,14 +1803,26 @@ function BillingView({ user, setUser }: { user: UserProfile | null; setUser: Rea
                           }`}>
                             {onHold ? 'On hold' : isCanceled ? 'Auto-pay off' : 'Active'}
                           </span>
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-600`}>
+                            Drain #{idx + 1}
+                          </span>
                         </div>
-                        <p className={`text-xs mt-0.5 ${theme.usageSub}`}>
-                          {s.creditsRemaining.toLocaleString()} / {s.monthlyCredits.toLocaleString()} credits
-                          {' · '}
-                          {isCanceled ? 'Ends' : 'Renews'} {periodEndLabel}
-                          {' · '}
-                          Drain order #{idx + 1}
+                        <p className={`text-xs mt-1 ${theme.usageSub}`}>
+                          {price} / month · Subscribed {purchasedOn} · {isCanceled ? 'Ends' : 'Renews'} {periodEndLabel}
                         </p>
+                      </div>
+                    </div>
+
+                    <div className="mb-3">
+                      <div className={`flex justify-between text-[11px] mb-1 ${theme.usageSub}`}>
+                        <span>{usedThisPeriod.toLocaleString()} used this period</span>
+                        <span>{s.creditsRemaining.toLocaleString()} / {s.monthlyCredits.toLocaleString()} left</span>
+                      </div>
+                      <div className={`h-2 rounded-full w-full overflow-hidden ${theme.trackBg === 'bg-white/10' ? 'bg-white/20' : 'bg-neutral-200/60'}`}>
+                        <div
+                          className={`h-full rounded-full bg-gradient-to-r ${theme.barFrom} ${theme.barTo}`}
+                          style={{ width: `${usedPercent}%` }}
+                        />
                       </div>
                     </div>
 
@@ -1834,6 +1862,52 @@ function BillingView({ user, setUser }: { user: UserProfile | null; setUser: Rea
                 );
               })}
             </div>
+
+            {/* Add-on top-ups — one row per AddonGrant, FIFO ordered. Fully
+                drained ones are still listed so the user can see purchase
+                history. */}
+            {user?.addonGrants && user.addonGrants.length > 0 && (
+              <div className="mt-6">
+                <div className={`text-[11px] font-bold uppercase tracking-widest ${theme.usageAccent} mb-3`}>Add-on top-ups</div>
+                <div className="space-y-2">
+                  {user.addonGrants.map(g => {
+                    const drained = g.creditsRemaining === 0;
+                    const usedPct = g.originalAmount > 0
+                      ? Math.min(100, Math.max(0, ((g.originalAmount - g.creditsRemaining) / g.originalAmount) * 100))
+                      : 0;
+                    return (
+                      <div key={g.id} className={`rounded-xl border p-3 ${theme.trackBg} ${theme.usageCardBorder}`}>
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className={`text-sm font-semibold ${theme.usageText}`}>${g.amountUSD} top-up</span>
+                              {drained && (
+                                <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-neutral-200 text-neutral-600">
+                                  Drained
+                                </span>
+                              )}
+                            </div>
+                            <p className={`text-[11px] mt-0.5 ${theme.usageSub}`}>
+                              Bought {new Date(g.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                              {' · '}
+                              {g.creditsRemaining.toLocaleString()} / {g.originalAmount.toLocaleString()} credits remaining
+                              {' · '}
+                              permanent
+                            </p>
+                          </div>
+                        </div>
+                        <div className={`mt-2 h-1.5 rounded-full w-full overflow-hidden ${theme.trackBg === 'bg-white/10' ? 'bg-white/20' : 'bg-neutral-200/60'}`}>
+                          <div
+                            className={`h-full rounded-full bg-gradient-to-r ${theme.barFrom} ${theme.barTo}`}
+                            style={{ width: `${usedPct}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {subError && (
               <div className="mt-4 px-4 py-3 rounded-xl text-sm font-medium border border-red-200 bg-red-50 text-red-700">

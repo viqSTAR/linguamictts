@@ -1,7 +1,7 @@
 "use client";
 import Navbar from '../components/Navbar';
 import Link from 'next/link';
-import { Play } from 'lucide-react';
+import { Play, Coins } from 'lucide-react';
 import { motion } from 'framer-motion';
 import Image from 'next/image';
 import logo from '@/assets/linguamicorange copy.png';
@@ -209,9 +209,9 @@ export default function Home() {
           className="mt-8 flex items-center justify-center gap-2 text-sm font-medium"
         >
           <div className="w-5 h-5 rounded-full bg-orange-100 flex items-center justify-center">
-            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-orange-500"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path></svg>
+            <Coins className="w-3 h-3 text-orange-500" strokeWidth={2.5} />
           </div>
-          <span className="text-neutral-500">Includes <span className="text-neutral-900 font-semibold">12,000 free credits</span> every month.</span>
+          <span className="text-neutral-500">Start with <span className="text-neutral-900 font-semibold">12,000 free credits</span> · 10,000 every month after.</span>
         </motion.div>
 
         {/* Premium Layered Creator Demo Section */}
@@ -556,17 +556,15 @@ export default function Home() {
               <li><Link href="/studio" className="hover:text-white transition-colors">Studio</Link></li>
               <li><Link href="/pricing" className="hover:text-white transition-colors">Pricing</Link></li>
               <li><Link href="/samples" className="hover:text-white transition-colors">Voice Samples</Link></li>
-              <li><Link href="/docs" className="hover:text-white transition-colors">API Documentation</Link></li>
             </ul>
           </div>
 
           <div>
             <h4 className="text-white font-medium mb-6 uppercase tracking-wider text-xs">Company</h4>
             <ul className="space-y-4 text-sm font-light">
-              <li><Link href="/contact" className="hover:text-white transition-colors">Contact Us</Link></li>
               <li><Link href="/about" className="hover:text-white transition-colors">About Us</Link></li>
-              <li><a href="#" className="hover:text-white transition-colors">Blog</a></li>
-              <li><a href="#" className="hover:text-white transition-colors">Careers</a></li>
+              <li><Link href="/contact" className="hover:text-white transition-colors">Contact</Link></li>
+              <li><a href="mailto:company@linguamic.com" className="hover:text-white transition-colors">Email Support</a></li>
             </ul>
           </div>
 
@@ -576,7 +574,6 @@ export default function Home() {
               <li><Link href="/terms" className="hover:text-white transition-colors">Terms of Service</Link></li>
               <li><Link href="/privacy" className="hover:text-white transition-colors">Privacy Policy</Link></li>
               <li><Link href="/attributions" className="hover:text-white transition-colors">Attributions</Link></li>
-              <li><a href="#" className="hover:text-white transition-colors">Security</a></li>
             </ul>
           </div>
 

@@ -1,11 +1,13 @@
 "use client";
 import { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ArrowRight, Sparkles } from 'lucide-react';
+import { ArrowRight, Coins } from 'lucide-react';
 import { useGoogleLogin } from '@react-oauth/google';
 import api from '@/lib/api';
+import logo from '@/assets/linguamicorange copy.png';
 
 export default function Register() {
   const router = useRouter();
@@ -86,7 +88,7 @@ export default function Register() {
             initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
             className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white border border-orange-100 shadow-[0_8px_16px_-6px_rgba(249,115,22,0.15)]"
           >
-            <Sparkles className="w-4 h-4 text-orange-500" />
+            <Coins className="w-4 h-4 text-orange-500" strokeWidth={2.25} />
             <span className="text-sm font-semibold text-neutral-800">12,000 free credits <span className="text-neutral-400 font-normal">included</span></span>
           </motion.div>
         </div>
@@ -95,8 +97,8 @@ export default function Register() {
         <div className="bg-white/70 backdrop-blur-3xl rounded-[2.5rem] p-8 md:p-10 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.05),_inset_0_1px_1px_rgba(255,255,255,1)] border border-white">
           
           <div className="flex flex-col items-center text-center mb-10">
-            <Link href="/" className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-tr from-orange-500 to-amber-400 text-white shadow-lg font-bold text-2xl mb-6 hover:scale-105 transition-transform">
-              V
+            <Link href="/" className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-white shadow-[0_8px_20px_-6px_rgba(249,115,22,0.25)] border border-orange-100 mb-6 hover:scale-105 transition-transform">
+              <Image src={logo} alt="Linguamic" className="w-9 h-9 object-contain" priority />
             </Link>
             <h1 className="text-2xl md:text-3xl font-semibold text-neutral-900 tracking-tight mb-2">Create your account</h1>
             <p className="text-neutral-500 text-sm">Join the future of cinematic digital voice.</p>

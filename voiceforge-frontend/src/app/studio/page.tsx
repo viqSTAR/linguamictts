@@ -5,10 +5,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import Image from 'next/image';
 import logo from '@/assets/linguamicorange copy.png';
-import { 
-  Mic2, CreditCard, Settings, LogOut, 
+import {
+  Mic2, CreditCard, Settings, LogOut,
   Download, ChevronDown, Sparkles, Loader2, Wand2, SlidersHorizontal, Activity,
-  User, CheckCircle2, RefreshCw
+  User, CheckCircle2, RefreshCw, Coins
 } from 'lucide-react';
 import api from '@/lib/api';
 
@@ -175,7 +175,7 @@ export default function Studio() {
           
           <div className="flex items-center gap-4 text-sm font-medium">
              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-orange-50 border border-orange-100 text-orange-700 shadow-sm">
-               <Sparkles className="w-4 h-4 text-orange-500" />
+               <Coins className="w-4 h-4 text-orange-500" strokeWidth={2.25} />
                {user?.creditsBalance?.toLocaleString()} Credits
              </div>
           </div>
@@ -582,7 +582,7 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
 
     } catch (err) {
       console.error('Generation failed', err);
-      alert('Failed to generate audio. Check credits or backend status.');
+      alert('We couldn’t generate that audio. Please check your credit balance and try again.');
       setGenerating(false);
     } finally {
       const context = audioContextRef.current;
@@ -702,7 +702,7 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
       if (data.text) setSttResult(data.text);
     } catch (err) {
       console.error('Transcription failed', err);
-      alert('Failed to transcribe audio. Check credits or backend status.');
+      alert('We couldn’t transcribe that audio. Please check your credit balance and try again.');
     } finally {
       setGenerating(false);
     }
@@ -798,7 +798,7 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
       <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold mb-2 bg-gradient-to-br from-neutral-900 to-neutral-500 bg-clip-text text-transparent">Voice Studio</h1>
-          <p className="text-neutral-500">Design the perfect voiceover or transcribe audio with Whisper.</p>
+          <p className="text-neutral-500">Design studio-grade voiceovers or transcribe audio with pinpoint accuracy.</p>
         </div>
         <div className="flex bg-neutral-100 p-1.5 rounded-full w-fit shadow-inner border border-black/5 relative">
           <button 

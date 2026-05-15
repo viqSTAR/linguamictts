@@ -1,11 +1,13 @@
 "use client";
 import { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { ArrowRight, PlayCircle } from 'lucide-react';
 import { useGoogleLogin } from '@react-oauth/google';
 import api from '@/lib/api';
+import logo from '@/assets/linguamicorange copy.png';
 
 export default function Login() {
   const router = useRouter();
@@ -88,8 +90,8 @@ export default function Login() {
         <div className="bg-white/70 backdrop-blur-3xl rounded-[2.5rem] p-8 md:p-10 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.05),_inset_0_1px_1px_rgba(255,255,255,1)] border border-white">
           
           <div className="flex flex-col items-center text-center mb-10">
-            <Link href="/" className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-tr from-orange-500 to-amber-400 text-white shadow-lg font-bold text-2xl mb-6 hover:scale-105 transition-transform">
-              V
+            <Link href="/" className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-white shadow-[0_8px_20px_-6px_rgba(249,115,22,0.25)] border border-orange-100 mb-6 hover:scale-105 transition-transform">
+              <Image src={logo} alt="Linguamic" className="w-9 h-9 object-contain" priority />
             </Link>
             <h1 className="text-2xl md:text-3xl font-semibold text-neutral-900 tracking-tight mb-2">Welcome back</h1>
             <p className="text-neutral-500 text-sm">Sign in to continue to your studio.</p>

@@ -84,15 +84,15 @@ export default function Privacy() {
         </p>
       </DocSection>
 
-      <DocSection number="07" title="Open Source and Third Party Services">
-        <p>LinguaMic uses the following third party services:</p>
+      <DocSection number="07" title="Third Party Services">
+        <p>LinguaMic relies on the following third party providers to deliver our service:</p>
         <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-sm text-neutral-600">
-          <p>Orpheus TTS (Canopy Labs) - powers voice generation, Apache 2.0 license.</p>
-          <p>Whisper (OpenAI) - powers speech transcription.</p>
-          <p>MongoDB - database hosting.</p>
-          <p>Cloudflare - content delivery and security.</p>
+          <p>Payment processing - secure billing and subscription management.</p>
+          <p>Database hosting - encrypted storage of account data.</p>
+          <p>Content delivery and security - global edge network and DDoS protection.</p>
+          <p>Email delivery - transactional notifications and account communications.</p>
         </div>
-        <p>Each third party operates under their own privacy policy.</p>
+        <p>Each provider operates under their own privacy policy and is bound by data processing agreements where applicable.</p>
       </DocSection>
 
       <DocSection number="08" title="Data Retention">

@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Navbar from '../../components/Navbar';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, Sparkles, Loader2, CreditCard, X, CheckCircle2, ArrowRight, Zap } from 'lucide-react';
+import { Check, Loader2, CreditCard, X, CheckCircle2, ArrowRight, Zap, Flame, Rocket, ShieldCheck } from 'lucide-react';
 
 type Subscription = {
   id: string;
@@ -421,7 +421,7 @@ export default function Pricing() {
                   <span className={`text-xs font-semibold uppercase tracking-widest ${plan.accent}`}>{plan.badge}</span>
                   {plan.key === 'CREATOR' && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/20 text-orange-200 px-2.5 py-1 text-[10px] font-semibold uppercase">
-                      <Sparkles className="w-3 h-3" /> Popular
+                      <Flame className="w-3 h-3" strokeWidth={2.5} /> Popular
                     </span>
                   )}
                   {isAlreadyHeld && (
@@ -506,7 +506,7 @@ export default function Pricing() {
                   <>
                     <div className="flex items-center gap-3 mb-6 pb-6 border-b border-black/5">
                       <div className="w-12 h-12 bg-gradient-to-br from-orange-100 to-orange-50 rounded-xl border border-orange-200 flex items-center justify-center shadow-inner">
-                        {modal.mode === 'plan' ? <Sparkles className="w-6 h-6 text-orange-500" /> : <CreditCard className="w-6 h-6 text-orange-500" />}
+                        {modal.mode === 'plan' ? <Rocket className="w-6 h-6 text-orange-500" strokeWidth={2.25} /> : <CreditCard className="w-6 h-6 text-orange-500" strokeWidth={2.25} />}
                       </div>
                       <div className="text-left">
                         <h2 className="text-xl font-bold text-neutral-900">
@@ -517,12 +517,12 @@ export default function Pricing() {
                     </div>
 
                     <div className="text-left mb-6 p-4 bg-neutral-50 border border-neutral-200 rounded-2xl">
-                      <p className="text-sm text-neutral-700 mb-2 font-medium">Secure checkout by Dodo Payments</p>
+                      <p className="text-sm text-neutral-700 mb-2 font-medium">Secure, encrypted checkout</p>
                       <p className="text-xs text-neutral-500 leading-relaxed">
-                        You&apos;ll be redirected to a hosted checkout page to complete payment.
+                        You&apos;ll be redirected to our hosted checkout to complete payment.
                         {modal.mode === 'plan'
-                          ? ' Your plan will activate and credits will appear after payment is confirmed.'
-                          : ' Credits will appear in your account once payment is confirmed.'}
+                          ? ' Your plan activates and credits appear the moment payment is confirmed.'
+                          : ' Credits land in your account the moment payment is confirmed.'}
                       </p>
                     </div>
 
@@ -544,7 +544,7 @@ export default function Pricing() {
                       <ArrowRight className="w-4 h-4" />
                     </button>
                     <p className="text-xs text-neutral-400 mt-4 flex items-center gap-1 justify-center">
-                      <Sparkles className="w-3 h-3" /> Powered by Dodo Payments
+                      <ShieldCheck className="w-3.5 h-3.5" strokeWidth={2.25} /> 256-bit encrypted checkout
                     </p>
                   </>
                 )}
@@ -561,7 +561,7 @@ export default function Pricing() {
                       {modal.mode === 'plan' ? 'Upgrading Plan...' : 'Processing Payment'}
                     </h2>
                     <p className="text-neutral-500 animate-pulse">
-                      {dodoEnabled ? 'Opening secure checkout...' : 'Contacting dummy bank...'}
+                      {dodoEnabled ? 'Opening secure checkout…' : 'Payments are temporarily offline'}
                     </p>
                   </div>
                 )}

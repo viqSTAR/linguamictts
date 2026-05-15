@@ -29,7 +29,7 @@ export default function Terms() {
             <ul className="mt-3 space-y-2 text-sm text-neutral-600">
               <li>Starter - 45,000 credits for $4.99/month</li>
               <li>Creator - 210,000 credits for $18.99/month</li>
-              <li>Pro - 859,000 credits for $79.99/month</li>
+              <li>Pro - 850,000 credits for $79.99/month</li>
             </ul>
           </div>
           <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-5">
@@ -38,7 +38,7 @@ export default function Terms() {
           </div>
         </div>
         <div className="rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-neutral-700">
-          However users will receive a total of 10k free credits per month.
+          Every account also receives 10,000 free credits each month, on every plan, indefinitely.
         </div>
         <p>
           Monthly subscription credits reset at the start of each billing cycle. Unused credits do not carry over. Pay As

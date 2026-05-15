@@ -3,7 +3,7 @@ import React, { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Navbar from '../../../components/Navbar';
-import { Loader2, CheckCircle2, AlertCircle, ArrowRight, Sparkles } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertCircle, ArrowRight, ShieldCheck } from 'lucide-react';
 
 // Lands here after Dodo's hosted checkout redirects back. The webhook is the
 // authoritative source for credit/plan grants — this page just polls the
@@ -163,9 +163,9 @@ function BillingReturn() {
               <div className="w-20 h-20 bg-white border border-black/5 shadow-lg rounded-2xl flex items-center justify-center mb-6">
                 <Loader2 className="w-10 h-10 text-orange-500 animate-spin" />
               </div>
-              <h1 className="text-2xl font-bold text-neutral-900 mb-2">Confirming your payment...</h1>
+              <h1 className="text-2xl font-bold text-neutral-900 mb-2">Confirming your payment</h1>
               <p className="text-neutral-500 max-w-md">
-                We&apos;re waiting for confirmation from Dodo Payments. This usually takes a few seconds.
+                We&apos;re finalizing your transaction with our secure payment processor. This usually takes a few seconds.
               </p>
             </>
           )}
@@ -176,12 +176,12 @@ function BillingReturn() {
                 <CheckCircle2 className="w-12 h-12" strokeWidth={3} />
               </div>
               <h1 className="text-3xl font-bold text-neutral-900 mb-2">
-                {kind === 'plan' ? 'Plan upgraded!' : 'Credits added!'}
+                {kind === 'plan' ? 'You’re all set' : 'Credits added'}
               </h1>
               <p className="text-neutral-500 mb-6 max-w-md">
                 {kind === 'plan'
-                  ? `Your ${latestPlanKey || 'new'} plan is active. Credits are stacked on top of any existing plans.`
-                  : 'Your add-on credits have been added to your account.'}
+                  ? `Your ${latestPlanKey || 'new'} plan is now active. Any new credits stack on top of your existing balance.`
+                  : 'Your top-up credits are now available in your account.'}
               </p>
               {balance !== null && (
                 <div className="bg-green-50 text-green-800 font-semibold px-4 py-2 rounded-xl mb-8 border border-green-200">
@@ -202,9 +202,9 @@ function BillingReturn() {
               <div className="w-20 h-20 bg-amber-50 border border-amber-200 rounded-2xl flex items-center justify-center mb-6">
                 <AlertCircle className="w-10 h-10 text-amber-600" />
               </div>
-              <h1 className="text-2xl font-bold text-neutral-900 mb-2">Still confirming...</h1>
+              <h1 className="text-2xl font-bold text-neutral-900 mb-2">Still confirming</h1>
               <p className="text-neutral-500 mb-6 max-w-md">
-                Your payment may still be processing on Dodo&apos;s side. Refresh this page in a minute, or head to the studio — your credits will appear automatically once confirmed.
+                Your payment is taking a little longer than usual to settle. Refresh this page in a minute, or head to the studio — your credits will appear automatically once confirmed.
               </p>
               <div className="flex gap-3">
                 <button
@@ -224,7 +224,7 @@ function BillingReturn() {
           )}
 
           <p className="text-xs text-neutral-400 mt-8 flex items-center gap-1">
-            <Sparkles className="w-3 h-3" /> Powered by Dodo Payments
+            <ShieldCheck className="w-3.5 h-3.5" strokeWidth={2.25} /> Secured end-to-end by Linguamic
           </p>
         </div>
       </main>

@@ -8,7 +8,7 @@ import logo from '@/assets/linguamicorange copy.png';
 import {
   Mic2, CreditCard, Settings, LogOut,
   Download, ChevronDown, Sparkles, Loader2, Wand2, SlidersHorizontal, Activity,
-  User, CheckCircle2, RefreshCw, Coins
+  User, CheckCircle2, RefreshCw, Coins, Play, Pause
 } from 'lucide-react';
 import api from '@/lib/api';
 
@@ -230,6 +230,25 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
   const [toneOpen, setToneOpen] = useState(false);
   const voiceRef = useRef<HTMLDivElement>(null);
   const toneRef = useRef<HTMLDivElement>(null);
+
+  // Preview-sample playback for the voice dropdown
+  const [previewingVoice, setPreviewingVoice] = useState<string | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const VOICE_PREVIEW_FILES: Record<string, string> = { leo: 'leo.mp3' };
+  const togglePreview = (voiceId: string) => {
+    if (previewingVoice === voiceId) {
+      previewAudioRef.current?.pause();
+      setPreviewingVoice(null);
+      return;
+    }
+    previewAudioRef.current?.pause();
+    const file = VOICE_PREVIEW_FILES[voiceId] ?? `${voiceId}.wav`;
+    const audio = new Audio(`/voices/${file}`);
+    previewAudioRef.current = audio;
+    audio.onended = () => setPreviewingVoice(null);
+    audio.onerror = () => setPreviewingVoice(null);
+    audio.play().then(() => setPreviewingVoice(voiceId)).catch(() => setPreviewingVoice(null));
+  };
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -1172,25 +1191,43 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
                       {VOICES.map(v => {
                         const meta = VOICE_META[v];
                         const isActive = voice === v;
+                        const isPreviewing = previewingVoice === v;
                         return (
-                          <button
+                          <div
                             key={v}
-                            onClick={() => { setVoice(v); setVoiceOpen(false); }}
-                            className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-all hover:bg-neutral-50 ${
+                            className={`w-full flex items-center gap-3 px-4 py-3 transition-all hover:bg-neutral-50 ${
                               isActive ? 'bg-orange-50' : ''
                             }`}
                           >
-                            <span className="text-xl leading-none">{meta.emoji}</span>
-                            <div className="flex-1 min-w-0">
-                              <div className={`text-sm font-bold capitalize ${isActive ? 'text-orange-600' : 'text-neutral-800'}`}>
-                                {v === 'jessi' ? 'Jessi' : v.charAt(0).toUpperCase() + v.slice(1)}
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); togglePreview(v); }}
+                              aria-label={isPreviewing ? `Pause ${v} preview` : `Play ${v} preview`}
+                              className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+                                isPreviewing
+                                  ? 'bg-orange-500 text-white'
+                                  : 'bg-white border border-black/10 text-neutral-600 hover:border-orange-300 hover:text-orange-600'
+                              }`}
+                            >
+                              {isPreviewing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 ml-0.5" />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setVoice(v); setVoiceOpen(false); }}
+                              className="flex-1 flex items-center gap-3 text-left min-w-0"
+                            >
+                              <span className="text-xl leading-none">{meta.emoji}</span>
+                              <div className="flex-1 min-w-0">
+                                <div className={`text-sm font-bold capitalize ${isActive ? 'text-orange-600' : 'text-neutral-800'}`}>
+                                  {v === 'jessi' ? 'Jessi' : v.charAt(0).toUpperCase() + v.slice(1)}
+                                </div>
+                                <div className={`text-[10px] font-medium ${meta.gender === 'female' ? 'text-blue-500' : 'text-violet-500'}`}>
+                                  {meta.gender === 'female' ? '♀ Female' : '♂ Male'} · {meta.desc}
+                                </div>
                               </div>
-                              <div className={`text-[10px] font-medium ${meta.gender === 'female' ? 'text-blue-500' : 'text-violet-500'}`}>
-                                {meta.gender === 'female' ? '♀ Female' : '♂ Male'} · {meta.desc}
-                              </div>
-                            </div>
-                            {isActive && <div className="w-2 h-2 rounded-full bg-orange-400 shrink-0" />}
-                          </button>
+                              {isActive && <div className="w-2 h-2 rounded-full bg-orange-400 shrink-0" />}
+                            </button>
+                          </div>
                         );
                       })}
                     </motion.div>

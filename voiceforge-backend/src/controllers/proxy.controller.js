@@ -17,6 +17,11 @@ const {
 const FASTAPI_URL = process.env.FASTAPI_URL || 'http://localhost:8000';
 const FASTAPI_INTERNAL_KEY = process.env.FASTAPI_INTERNAL_KEY || 'default_dev_key';
 
+// When FASTAPI_URL is an ngrok free tunnel, ngrok intercepts unrecognised
+// callers with an HTML browser-warning page. Sending this header bypasses it
+// so the request actually reaches FastAPI.
+const NGROK_BYPASS_HEADER = { 'ngrok-skip-browser-warning': 'true' };
+
 const DEMO_MAX_CHARS = 500;
 const DEMO_ALLOWED_KEYS = new Set([
   'text',
@@ -154,6 +159,7 @@ const performBilledTts = async ({ req, res, userId, apiKeyId, endpointType }) =>
       headers: {
         'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}`,
         'Content-Type': 'application/json',
+        ...NGROK_BYPASS_HEADER,
       },
       responseType: 'stream',
       validateStatus: () => true,
@@ -272,6 +278,7 @@ const proxySTT = async (req, res) => {
         headers: {
           'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}`,
           ...form.getHeaders(),
+          ...NGROK_BYPASS_HEADER,
         },
         validateStatus: () => true,
       });
@@ -329,7 +336,10 @@ const proxySTT = async (req, res) => {
 const proxyVoices = async (req, res) => {
   try {
     const response = await axios.get(`${FASTAPI_URL}/v1/voices`, {
-      headers: { 'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}` },
+      headers: {
+        'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}`,
+        ...NGROK_BYPASS_HEADER,
+      },
       validateStatus: () => true,
     });
 
@@ -438,6 +448,7 @@ const proxyDemoTTS = async (req, res) => {
       headers: {
         'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}`,
         'Content-Type': 'application/json',
+        ...NGROK_BYPASS_HEADER,
       },
       responseType: 'stream',
       validateStatus: () => true,
@@ -482,6 +493,7 @@ const proxyStudioSTT = async (req, res) => {
         headers: {
           'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}`,
           ...form.getHeaders(),
+          ...NGROK_BYPASS_HEADER,
         },
         validateStatus: () => true,
       });

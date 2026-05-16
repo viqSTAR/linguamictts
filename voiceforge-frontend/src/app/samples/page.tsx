@@ -6,7 +6,7 @@ import { Play, Pause, Volume2 } from 'lucide-react';
 
 const voices = [
   { id: 'tara', name: 'Tara', tone: 'calm', tags: ['Female', 'Calm', 'Airy'], desc: 'A light, gentle, and airy voice perfect for meditation and relaxation.', text: 'Hey!, I am tara, What about you?' },
-  { id: 'leo', name: 'Leo', tone: 'adventurous', tags: ['Male', 'Adventurous', 'Bold'], desc: 'Ideal for action and excitement.', text: 'Hey! I\'m Leo. Are you ready for an adventure?' },
+  { id: 'leo', name: 'Leo', tone: 'adventurous', tags: ['Male', 'Adventurous', 'Bold'], desc: 'Ideal for action and excitement.', text: 'Hey! I\'m Leo. Are you ready for an adventure?', file: 'leo.mp3' },
   { id: 'leah', name: 'Leah', tone: 'romantic', tags: ['Female', 'Romantic', 'Vibey'], desc: 'A soft, intimate, and vibey voice.', text: 'Hey! I am Leah. Let\'s catch a vibe together.' },
   { id: 'jessi', name: 'Jessi', tone: 'excited', tags: ['Female', 'Excited', 'Bubbly'], desc: 'A high-energy, enthusiastic voice perfect for celebrations.', text: 'Hey! I am Jessi. I can\'t wait to get started!' },
   { id: 'dan', name: 'Dan', tone: 'angry', tags: ['Male', 'Angry', 'Disappointed'], desc: 'An intense, impatient, and frustrated voice.', text: 'Look, I\'m Dan. Honestly, I expected better from you.' },
@@ -37,7 +37,7 @@ export default function Samples() {
     }
 
     try {
-      const audio = new Audio(`/voices/${voice.id}.wav`);
+      const audio = new Audio(`/voices/${voice.file ?? `${voice.id}.wav`}`);
       audioRef.current = audio;
 
       audio.onplay = () => {

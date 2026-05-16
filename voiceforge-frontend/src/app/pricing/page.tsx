@@ -46,7 +46,7 @@ const PLAN_DEFINITIONS = [
     theme: 'bg-white/80 border-black/5',
     accent: 'text-orange-600',
     highlight: 'bg-orange-50',
-    features: ['All Free features', 'Faster throughput tier', 'API key management', 'Email support'],
+    features: ['All Free features', 'Faster throughput tier', 'API key management', 'Faster support'],
   },
   {
     key: 'CREATOR',
@@ -61,7 +61,7 @@ const PLAN_DEFINITIONS = [
     theme: 'bg-black text-white border-black/80',
     accent: 'text-orange-300',
     highlight: 'bg-orange-500/15',
-    features: ['Everything in Starter', 'Priority model queue', 'Team usage insights', 'Pro voice controls'],
+    features: ['Everything in Starter', 'Priority model queue', 'Faster support'],
   },
   {
     key: 'PRO',
@@ -76,7 +76,7 @@ const PLAN_DEFINITIONS = [
     theme: 'bg-gradient-to-br from-orange-50 to-amber-50 border-orange-200/60',
     accent: 'text-orange-700',
     highlight: 'bg-orange-100',
-    features: ['Everything in Creator', 'Higher concurrency', 'Premium voice catalog', 'Priority support'],
+    features: ['Everything in Creator', 'Higher concurrency', 'Priority support'],
   },
 ];
 

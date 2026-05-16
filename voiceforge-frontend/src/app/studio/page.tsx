@@ -283,7 +283,7 @@ export default function Studio() {
         {/* Content Views */}
         <main className="px-4 sm:px-6 md:px-8 py-6 md:py-8 max-w-5xl mx-auto w-full pb-20">
           <AnimatePresence mode="wait">
-            {activeTab === 'playground' && <PlaygroundView key="playground" text={text} setText={setText} user={user} setUser={setUser} />}
+            {activeTab === 'playground' && <PlaygroundView key="playground" text={text} setText={setText} user={user} setUser={setUser} setActiveTab={setActiveTab} />}
             {activeTab === 'billing'    && <BillingView   key="billing"    user={user} setUser={setUser} />}
             {activeTab === 'settings'  && <SettingsView  key="settings"   user={user} setUser={setUser} />}
           </AnimatePresence>
@@ -294,7 +294,7 @@ export default function Studio() {
 }
 
 // Sub-components
-function PlaygroundView({ text, setText, user, setUser }: { text: string; setText: (val: string) => void; user: UserProfile | null; setUser: React.Dispatch<React.SetStateAction<UserProfile | null>> }) {
+function PlaygroundView({ text, setText, user, setUser, setActiveTab }: { text: string; setText: (val: string) => void; user: UserProfile | null; setUser: React.Dispatch<React.SetStateAction<UserProfile | null>>; setActiveTab: (tab: string) => void }) {
   const [generating, setGenerating] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);

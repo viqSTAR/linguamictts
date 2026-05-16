@@ -33,8 +33,8 @@ function ReturnLoading() {
   return (
     <div className="min-h-screen bg-[#FCFCFD] font-sans">
       <Navbar />
-      <main className="pt-36 pb-28 px-6 max-w-2xl mx-auto flex flex-col items-center">
-        <div className="w-full bg-white/70 border border-black/5 rounded-[2rem] p-10 flex flex-col items-center text-center">
+      <main className="pt-28 sm:pt-36 pb-20 sm:pb-28 px-4 sm:px-6 max-w-2xl mx-auto flex flex-col items-center">
+        <div className="w-full bg-white/70 border border-black/5 rounded-[1.75rem] sm:rounded-[2rem] p-6 sm:p-10 flex flex-col items-center text-center">
           <Loader2 className="w-10 h-10 text-orange-500 animate-spin" />
         </div>
       </main>
@@ -156,8 +156,8 @@ function BillingReturn() {
   return (
     <div className="min-h-screen bg-[#FCFCFD] font-sans">
       <Navbar />
-      <main className="pt-36 pb-28 px-6 max-w-2xl mx-auto flex flex-col items-center">
-        <div className="w-full bg-white/70 border border-black/5 rounded-[2rem] p-10 shadow-[0_18px_50px_-30px_rgba(0,0,0,0.35)] flex flex-col items-center text-center">
+      <main className="pt-28 sm:pt-36 pb-20 sm:pb-28 px-4 sm:px-6 max-w-2xl mx-auto flex flex-col items-center">
+        <div className="w-full bg-white/70 border border-black/5 rounded-[1.75rem] sm:rounded-[2rem] p-6 sm:p-10 shadow-[0_18px_50px_-30px_rgba(0,0,0,0.35)] flex flex-col items-center text-center">
           {phase === 'waiting' && (
             <>
               <div className="w-20 h-20 bg-white border border-black/5 shadow-lg rounded-2xl flex items-center justify-center mb-6">

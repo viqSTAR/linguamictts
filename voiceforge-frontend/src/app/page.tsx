@@ -163,42 +163,42 @@ export default function Home() {
       <Navbar />
 
       {/* Minimal Hero Section */}
-      <main className="pt-52 pb-32 px-6 max-w-7xl mx-auto flex flex-col items-center text-center relative z-10">
-        
-        <motion.div 
+      <main className="pt-32 sm:pt-52 pb-20 sm:pb-32 px-4 sm:px-6 max-w-7xl mx-auto flex flex-col items-center text-center relative z-10">
+
+        <motion.div
           initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.5 }}
-          className="inline-flex items-center gap-3 px-5 py-2.5 rounded-full bg-white/30 border border-white/60 shadow-[0_12px_24px_-8px_rgba(0,0,0,0.08),_inset_0_1px_1px_rgba(255,255,255,0.9),_inset_0_-1px_1px_rgba(255,255,255,0.4)] mb-12 backdrop-blur-2xl saturate-150 relative overflow-hidden group"
+          className="inline-flex items-center gap-3 px-4 sm:px-5 py-2 sm:py-2.5 rounded-full bg-white/30 border border-white/60 shadow-[0_12px_24px_-8px_rgba(0,0,0,0.08),_inset_0_1px_1px_rgba(255,255,255,0.9),_inset_0_-1px_1px_rgba(255,255,255,0.4)] mb-8 sm:mb-12 backdrop-blur-2xl saturate-150 relative overflow-hidden group"
         >
           <div className="absolute inset-0 bg-gradient-to-r from-orange-500/10 to-amber-500/10 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
           <div className="flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.8)] animate-pulse" />
           </div>
-          <span className="text-sm font-semibold text-neutral-800 tracking-wide uppercase">Linguamic Studio 2.0</span>
+          <span className="text-xs sm:text-sm font-semibold text-neutral-800 tracking-wide uppercase">Linguamic Studio 2.0</span>
         </motion.div>
 
-        <motion.h1 
+        <motion.h1
           initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.1 }}
-          className="text-6xl md:text-[6rem] font-medium tracking-tight text-[#0A0A0A] mb-8 max-w-5xl leading-[1.05]"
+          className="text-[2.5rem] sm:text-6xl md:text-[6rem] font-medium tracking-tight text-[#0A0A0A] mb-6 sm:mb-8 max-w-5xl leading-[1.05]"
         >
           Pioneering the <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-500 via-amber-500 to-orange-400 italic pr-4">future</span><br />
           of digital voice.
         </motion.h1>
 
-        <motion.p 
+        <motion.p
           initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.2 }}
-          className="text-xl md:text-2xl text-neutral-500 max-w-3xl mb-14 leading-relaxed font-light"
+          className="text-base sm:text-xl md:text-2xl text-neutral-500 max-w-3xl mb-10 sm:mb-14 leading-relaxed font-light px-2"
         >
           Generate breathtaking, cinematic voiceovers in seconds. Designed for content creators, marketers, and visionaries.
         </motion.p>
 
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.3 }}
-          className="flex flex-col sm:flex-row gap-4 items-center justify-center w-full"
+          className="flex flex-col sm:flex-row gap-3 sm:gap-4 items-center justify-center w-full"
         >
-          <Link href={ctaHref} className="h-14 px-8 rounded-full bg-black text-white font-medium text-lg flex items-center justify-center gap-2 hover:bg-neutral-800 transition-all hover:scale-105 duration-300 shadow-[0_10px_40px_-10px_rgba(249,115,22,0.3)]">
+          <Link href={ctaHref} className="w-full sm:w-auto h-12 sm:h-14 px-6 sm:px-8 rounded-full bg-black text-white font-medium text-base sm:text-lg flex items-center justify-center gap-2 hover:bg-neutral-800 transition-all hover:scale-105 duration-300 shadow-[0_10px_40px_-10px_rgba(249,115,22,0.3)]">
             Start Creating Free <Play className="w-5 h-5 opacity-70 ml-1" fill="currentColor" />
           </Link>
-          <Link href="/samples" className="h-14 px-8 rounded-full bg-white/60 backdrop-blur-lg text-black border border-black/10 font-medium text-lg flex items-center justify-center gap-2 hover:bg-white transition-all hover:scale-105 duration-300 shadow-sm">
+          <Link href="/samples" className="w-full sm:w-auto h-12 sm:h-14 px-6 sm:px-8 rounded-full bg-white/60 backdrop-blur-lg text-black border border-black/10 font-medium text-base sm:text-lg flex items-center justify-center gap-2 hover:bg-white transition-all hover:scale-105 duration-300 shadow-sm">
             Listen to Samples
           </Link>
         </motion.div>
@@ -215,20 +215,20 @@ export default function Home() {
         </motion.div>
 
         {/* Premium Layered Creator Demo Section */}
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: 60 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 1, delay: 0.4 }}
-          className="mt-24 w-full max-w-3xl mx-auto relative perspective-1000"
+          className="mt-16 sm:mt-24 w-full max-w-3xl mx-auto relative perspective-1000"
         >
           <div className="absolute inset-0 bg-gradient-to-b from-orange-500/10 to-transparent rounded-[40px] blur-3xl opacity-50 transition-opacity duration-700" />
-          
+
           {/* Main Background Editor Panel */}
-          <div className="relative w-full rounded-[2.5rem] bg-white/60 border border-white/80 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.1),_inset_0_1px_1px_rgba(255,255,255,1)] backdrop-blur-3xl p-8 md:p-12 pb-24 ring-1 ring-black/5 z-10 transition-transform duration-700 hover:scale-[1.01]">
-            <div className="flex gap-4 md:gap-6">
-              <div className="w-10 h-10 rounded-full bg-orange-100/80 flex items-center justify-center shrink-0 mt-1 shadow-sm border border-orange-200">
-                <span className="text-orange-700 text-base font-semibold">L</span>
+          <div className="relative w-full rounded-[2rem] sm:rounded-[2.5rem] bg-white/60 border border-white/80 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.1),_inset_0_1px_1px_rgba(255,255,255,1)] backdrop-blur-3xl p-5 sm:p-8 md:p-12 pb-20 sm:pb-24 ring-1 ring-black/5 z-10 transition-transform duration-700 hover:scale-[1.01]">
+            <div className="flex gap-3 sm:gap-4 md:gap-6">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-orange-100/80 flex items-center justify-center shrink-0 mt-1 shadow-sm border border-orange-200">
+                <span className="text-orange-700 text-sm sm:text-base font-semibold">L</span>
               </div>
-              <p className="text-neutral-700 font-medium text-xl md:text-3xl leading-[1.6] tracking-tight">
-                <span className="text-orange-600 font-semibold mr-3">Narrator:</span>
+              <p className="text-neutral-700 font-medium text-base sm:text-xl md:text-3xl leading-[1.5] sm:leading-[1.6] tracking-tight text-left">
+                <span className="text-orange-600 font-semibold mr-2 sm:mr-3">Narrator:</span>
                 Strap in, because this next jump is going to be absolutely legendary! Here we go!
               </p>
             </div>
@@ -283,16 +283,16 @@ export default function Home() {
         </motion.div>
 
         {/* Feature Grid Below Hero */}
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: 40 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, margin: "-100px" }}
           transition={{ duration: 0.8 }}
-          className="mt-40 max-w-6xl mx-auto w-full relative z-10"
+          className="mt-24 sm:mt-40 max-w-6xl mx-auto w-full relative z-10"
         >
-          <div className="grid md:grid-cols-3 gap-6 text-left">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 text-left">
             {/* Feature Card 1 */}
-            <div className="relative p-8 rounded-[2rem] bg-white/40 border border-white/60 shadow-[0_12px_40px_-16px_rgba(0,0,0,0.05),_inset_0_1px_1px_rgba(255,255,255,1)] backdrop-blur-2xl hover:bg-white/60 transition-all duration-500 group overflow-hidden">
+            <div className="relative p-6 sm:p-8 rounded-[1.75rem] sm:rounded-[2rem] bg-white/40 border border-white/60 shadow-[0_12px_40px_-16px_rgba(0,0,0,0.05),_inset_0_1px_1px_rgba(255,255,255,1)] backdrop-blur-2xl hover:bg-white/60 transition-all duration-500 group overflow-hidden">
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-400 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
               <div className="w-12 h-12 rounded-2xl bg-white shadow-[0_4px_12px_rgba(0,0,0,0.05)] border border-black/5 flex items-center justify-center text-orange-500 mb-6 group-hover:scale-110 transition-transform duration-500 group-hover:shadow-[0_8px_24px_rgba(249,115,22,0.15)]">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
@@ -302,7 +302,7 @@ export default function Home() {
             </div>
 
             {/* Feature Card 2 */}
-            <div className="relative p-8 rounded-[2rem] bg-white/40 border border-white/60 shadow-[0_12px_40px_-16px_rgba(0,0,0,0.05),_inset_0_1px_1px_rgba(255,255,255,1)] backdrop-blur-2xl hover:bg-white/60 transition-all duration-500 group overflow-hidden mt-6 md:mt-0">
+            <div className="relative p-6 sm:p-8 rounded-[1.75rem] sm:rounded-[2rem] bg-white/40 border border-white/60 shadow-[0_12px_40px_-16px_rgba(0,0,0,0.05),_inset_0_1px_1px_rgba(255,255,255,1)] backdrop-blur-2xl hover:bg-white/60 transition-all duration-500 group overflow-hidden">
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-400 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
               <div className="w-12 h-12 rounded-2xl bg-white shadow-[0_4px_12px_rgba(0,0,0,0.05)] border border-black/5 flex items-center justify-center text-amber-500 mb-6 group-hover:scale-110 transition-transform duration-500 group-hover:shadow-[0_8px_24px_rgba(251,191,36,0.15)]">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v4"></path><path d="M12 18v4"></path><path d="M4.93 4.93l2.83 2.83"></path><path d="M16.24 16.24l2.83 2.83"></path><path d="M2 12h4"></path><path d="M18 12h4"></path><path d="M4.93 19.07l2.83-2.83"></path><path d="M16.24 7.76l2.83-2.83"></path></svg>
@@ -312,7 +312,7 @@ export default function Home() {
             </div>
 
             {/* Feature Card 3 */}
-            <div className="relative p-8 rounded-[2rem] bg-white/40 border border-white/60 shadow-[0_12px_40px_-16px_rgba(0,0,0,0.05),_inset_0_1px_1px_rgba(255,255,255,1)] backdrop-blur-2xl hover:bg-white/60 transition-all duration-500 group overflow-hidden mt-6 md:mt-0">
+            <div className="relative p-6 sm:p-8 rounded-[1.75rem] sm:rounded-[2rem] bg-white/40 border border-white/60 shadow-[0_12px_40px_-16px_rgba(0,0,0,0.05),_inset_0_1px_1px_rgba(255,255,255,1)] backdrop-blur-2xl hover:bg-white/60 transition-all duration-500 group overflow-hidden">
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-500 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
               <div className="w-12 h-12 rounded-2xl bg-white shadow-[0_4px_12px_rgba(0,0,0,0.05)] border border-black/5 flex items-center justify-center text-orange-600 mb-6 group-hover:scale-110 transition-transform duration-500 group-hover:shadow-[0_8px_24px_rgba(234,88,12,0.15)]">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
@@ -325,14 +325,14 @@ export default function Home() {
       </main>
 
       {/* Detailed Capabilities Section */}
-      <section className="py-32 bg-white w-full relative z-20 border-t border-black/5" id="use-cases">
-        <div className="max-w-6xl mx-auto px-6">
-          <motion.div 
+      <section className="py-20 sm:py-32 bg-white w-full relative z-20 border-t border-black/5" id="use-cases">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <motion.div
             initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-100px" }} transition={{ duration: 0.8 }}
-            className="text-center mb-24"
+            className="text-center mb-14 sm:mb-24"
           >
-            <h2 className="text-4xl md:text-5xl font-semibold text-neutral-900 tracking-tight mb-6">The complete toolkit for audio creators.</h2>
-            <p className="text-lg md:text-xl text-neutral-500 max-w-3xl mx-auto font-light leading-relaxed">
+            <h2 className="text-3xl sm:text-4xl md:text-5xl font-semibold text-neutral-900 tracking-tight mb-4 sm:mb-6">The complete toolkit for audio creators.</h2>
+            <p className="text-base sm:text-lg md:text-xl text-neutral-500 max-w-3xl mx-auto font-light leading-relaxed">
               We&apos;ve engineered the world&apos;s most advanced AI audio models into an intuitive platform, giving you unprecedented, professional control over how your content sounds.
             </p>
           </motion.div>
@@ -340,14 +340,14 @@ export default function Home() {
           {/* Row 1: Text-to-Speech */}
           <motion.div 
             initial={{ opacity: 0, y: 40 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-100px" }} transition={{ duration: 0.8 }}
-            className="flex flex-col md:flex-row items-center gap-16 mb-40"
+            className="flex flex-col md:flex-row items-center gap-10 sm:gap-16 mb-20 sm:mb-40"
           >
             <div className="flex-1 text-left">
               <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-orange-50 border border-orange-100 text-orange-700 text-sm font-semibold mb-6 shadow-sm">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="22"></line></svg>
                 Text-to-Speech Engine
               </div>
-              <h3 className="text-3xl md:text-4xl font-semibold text-neutral-900 mb-6 tracking-tight leading-[1.2]">Ultra-realistic voices that breathe life into text.</h3>
+              <h3 className="text-2xl sm:text-3xl md:text-4xl font-semibold text-neutral-900 mb-4 sm:mb-6 tracking-tight leading-[1.2]">Ultra-realistic voices that breathe life into text.</h3>
               <p className="text-lg text-neutral-500 leading-relaxed font-light mb-8">
                 Go beyond robotic generation. Our proprietary neural engine understands deep context, punctuation, and subtle emotion, delivering studio-grade voiceovers that are virtually indistinguishable from human narration.
               </p>
@@ -399,7 +399,7 @@ export default function Home() {
           {/* Row 2: Real-time Conversational Voice (Coming Soon) */}
           <motion.div 
             initial={{ opacity: 0, y: 40 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-100px" }} transition={{ duration: 0.8 }}
-            className="flex flex-col md:flex-row-reverse items-center gap-16 mb-40"
+            className="flex flex-col md:flex-row-reverse items-center gap-10 sm:gap-16 mb-20 sm:mb-40"
           >
             <div className="flex-1 text-left">
               <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-orange-50 border border-orange-100 text-orange-700 text-sm font-semibold mb-6 shadow-sm">
@@ -407,7 +407,7 @@ export default function Home() {
                 Real-Time Voice API
                 <span className="ml-2 px-2.5 py-0.5 bg-black text-white text-[10px] rounded-full uppercase tracking-wider">Coming Soon</span>
               </div>
-              <h3 className="text-3xl md:text-4xl font-semibold text-neutral-900 mb-6 tracking-tight leading-[1.2]">Bidirectional, conversational AI in milliseconds.</h3>
+              <h3 className="text-2xl sm:text-3xl md:text-4xl font-semibold text-neutral-900 mb-4 sm:mb-6 tracking-tight leading-[1.2]">Bidirectional, conversational AI in milliseconds.</h3>
               <p className="text-lg text-neutral-500 leading-relaxed font-light mb-8">
                 Build the next generation of voice agents. Our upcoming bidirectional WebSocket API allows you to stream audio to and from our models with latency so low, it feels exactly like a natural human conversation.
               </p>
@@ -471,7 +471,7 @@ export default function Home() {
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><path d="M16 13H8"></path><path d="M16 17H8"></path><path d="M10 9H8"></path></svg>
                 Speech-to-Text
               </div>
-              <h3 className="text-3xl md:text-4xl font-semibold text-neutral-900 mb-6 tracking-tight leading-[1.2]">Flawless transcription and automated subtitling.</h3>
+              <h3 className="text-2xl sm:text-3xl md:text-4xl font-semibold text-neutral-900 mb-4 sm:mb-6 tracking-tight leading-[1.2]">Flawless transcription and automated subtitling.</h3>
               <p className="text-lg text-neutral-500 leading-relaxed font-light mb-8">
                 Convert any audio or video file into perfectly formatted text in seconds. Our engine automatically identifies speakers, filters out background noise, and accurately transcribes heavy accents.
               </p>
@@ -535,7 +535,7 @@ export default function Home() {
       <footer className="w-full bg-[#0A0A0A] py-16 md:py-24 border-t border-black/10 relative overflow-hidden text-neutral-400">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(249,115,22,0.05)_0%,transparent_50%)] pointer-events-none" />
         
-        <div className="max-w-7xl mx-auto px-6 relative z-10 grid grid-cols-2 md:grid-cols-4 gap-12 md:gap-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 relative z-10 grid grid-cols-2 md:grid-cols-4 gap-10 md:gap-8">
           
           <div className="col-span-2 md:col-span-1">
             <div className="flex items-center gap-2 mb-6">

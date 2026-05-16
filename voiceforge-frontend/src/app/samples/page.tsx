@@ -66,21 +66,21 @@ export default function Samples() {
         <div className="absolute top-[-10%] right-[-10%] w-[100vw] h-[80vh] bg-gradient-to-bl from-amber-400/20 via-orange-200/10 to-transparent blur-[140px]" />
       </div>
 
-      <main className="pt-40 pb-32 px-6 max-w-7xl mx-auto relative z-10">
-        <motion.div 
+      <main className="pt-28 sm:pt-40 pb-20 sm:pb-32 px-4 sm:px-6 max-w-7xl mx-auto relative z-10">
+        <motion.div
           initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}
-          className="text-center mb-20"
+          className="text-center mb-12 sm:mb-20"
         >
-          <h1 className="text-5xl md:text-6xl font-medium tracking-tight text-[#0A0A0A] mb-6">Explore our voices.</h1>
-          <p className="text-xl text-neutral-500 max-w-2xl mx-auto font-light">Listen to a selection of our ultra-realistic, cinematic voice models. Ready to be used in your next big project.</p>
+          <h1 className="text-4xl sm:text-5xl md:text-6xl font-medium tracking-tight text-[#0A0A0A] mb-4 sm:mb-6">Explore our voices.</h1>
+          <p className="text-base sm:text-xl text-neutral-500 max-w-2xl mx-auto font-light">Listen to a selection of our ultra-realistic, cinematic voice models. Ready to be used in your next big project.</p>
         </motion.div>
 
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {voices.map((voice, i) => (
-            <motion.div 
+            <motion.div
               key={voice.id}
               initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: i * 0.1 }}
-              className="bg-white/60 backdrop-blur-2xl border border-black/5 rounded-[2rem] p-8 shadow-[0_12px_40px_-16px_rgba(0,0,0,0.05)] hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.08)] transition-all group"
+              className="bg-white/60 backdrop-blur-2xl border border-black/5 rounded-[1.75rem] sm:rounded-[2rem] p-6 sm:p-8 shadow-[0_12px_40px_-16px_rgba(0,0,0,0.05)] hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.08)] transition-all group"
             >
               <div className="flex justify-between items-start mb-6">
                 <div className="w-12 h-12 rounded-full bg-gradient-to-br from-orange-100 to-amber-50 flex items-center justify-center text-xl font-bold text-orange-600 shadow-inner border border-black/5">
@@ -101,8 +101,8 @@ export default function Samples() {
                 </button>
               </div>
 
-              <h3 className="text-2xl font-semibold text-neutral-900 mb-2">{voice.name}</h3>
-              <p className="text-neutral-500 text-sm mb-6 leading-relaxed h-10">{voice.desc}</p>
+              <h3 className="text-xl sm:text-2xl font-semibold text-neutral-900 mb-2">{voice.name}</h3>
+              <p className="text-neutral-500 text-sm mb-6 leading-relaxed sm:h-10">{voice.desc}</p>
 
               <div className="flex flex-wrap gap-2">
                 {voice.tags.map(tag => (

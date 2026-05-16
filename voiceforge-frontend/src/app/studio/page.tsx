@@ -8,7 +8,7 @@ import logo from '@/assets/linguamicorange copy.png';
 import {
   Mic2, CreditCard, Settings, LogOut,
   Download, ChevronDown, Sparkles, Loader2, Wand2, SlidersHorizontal, Activity,
-  User, CheckCircle2, RefreshCw, Coins, Play, Pause, Bell, X
+  User, CheckCircle2, RefreshCw, Coins, Play, Pause, Bell, X, Menu
 } from 'lucide-react';
 import api from '@/lib/api';
 
@@ -118,6 +118,13 @@ type RefundModalState = {
 export default function Studio() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('playground');
+  // Mobile sidebar drawer — desktop sidebar is always visible (md:flex).
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.body.style.overflow = sidebarOpen ? 'hidden' : '';
+    return () => { document.body.style.overflow = ''; };
+  }, [sidebarOpen]);
   const [text, setText] = useState('');
   
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -153,70 +160,128 @@ export default function Studio() {
     </div>;
   }
   
-  return (
-    <div className="min-h-screen bg-[#FAFAFA] text-neutral-900 flex font-sans selection:bg-orange-500/30">
-      
-      {/* SIDEBAR */}
-      <div className="w-64 border-r border-black/5 bg-white flex-col hidden md:flex">
-        <div className="p-6">
-          <Link href="/" className="inline-flex items-center gap-2 group w-fit">
-            <Image src={logo} alt="Linguamic Logo" className="w-8 h-8 object-contain" />
-            <span className="text-xl font-semibold tracking-tight">Linguamic</span>
-          </Link>
-        </div>
-
-        <div className="flex-1 px-4 py-2 space-y-1">
-          {tabs.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all ${
-                  isActive 
-                    ? 'bg-orange-500/10 text-orange-600' 
-                    : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-900'
-                }`}
-              >
-                <Icon className={`w-5 h-5 ${isActive ? 'text-orange-500' : 'text-neutral-400'}`} />
-                {tab.label}
-              </button>
-            )
-          })}
-        </div>
-
-        <div className="p-4 border-t border-black/5">
-          <div onClick={handleLogout} className="flex items-center gap-3 p-3 rounded-xl hover:bg-neutral-50 transition-colors cursor-pointer group">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-neutral-200 to-neutral-300 flex items-center justify-center text-neutral-600 font-bold uppercase">
-              {user?.name?.charAt(0) || 'U'}
-            </div>
-            <div className="flex-1 overflow-hidden">
-              <p className="text-sm font-semibold truncate">{user?.name}</p>
-              <p className="text-xs text-neutral-500 truncate">{user?.email}</p>
-            </div>
-            <LogOut className="w-4 h-4 text-neutral-400 group-hover:text-red-500 transition-colors" />
-          </div>
-        </div>
+  // Single sidebar JSX used by both the always-on desktop rail and the mobile
+  // drawer overlay. Keeps the two in sync.
+  const sidebarContent = (
+    <>
+      <div className="p-5 md:p-6 flex items-center justify-between">
+        <Link href="/" className="inline-flex items-center gap-2 group w-fit" onClick={() => setSidebarOpen(false)}>
+          <Image src={logo} alt="Linguamic Logo" className="w-7 h-7 md:w-8 md:h-8 object-contain" />
+          <span className="text-lg md:text-xl font-semibold tracking-tight">Linguamic</span>
+        </Link>
+        <button
+          type="button"
+          onClick={() => setSidebarOpen(false)}
+          aria-label="Close menu"
+          className="md:hidden w-9 h-9 rounded-full flex items-center justify-center hover:bg-neutral-100 transition-colors"
+        >
+          <X className="w-5 h-5 text-neutral-700" />
+        </button>
       </div>
 
+      <div className="flex-1 px-3 md:px-4 py-2 space-y-1">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => { setActiveTab(tab.id); setSidebarOpen(false); }}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all ${
+                isActive
+                  ? 'bg-orange-500/10 text-orange-600'
+                  : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-900'
+              }`}
+            >
+              <Icon className={`w-5 h-5 ${isActive ? 'text-orange-500' : 'text-neutral-400'}`} />
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="p-3 md:p-4 border-t border-black/5">
+        <div onClick={handleLogout} className="flex items-center gap-3 p-3 rounded-xl hover:bg-neutral-50 transition-colors cursor-pointer group">
+          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-neutral-200 to-neutral-300 flex items-center justify-center text-neutral-600 font-bold uppercase shrink-0">
+            {user?.name?.charAt(0) || 'U'}
+          </div>
+          <div className="flex-1 overflow-hidden min-w-0">
+            <p className="text-sm font-semibold truncate">{user?.name}</p>
+            <p className="text-xs text-neutral-500 truncate">{user?.email}</p>
+          </div>
+          <LogOut className="w-4 h-4 text-neutral-400 group-hover:text-red-500 transition-colors shrink-0" />
+        </div>
+      </div>
+    </>
+  );
+
+  return (
+    <div className="min-h-screen bg-[#FAFAFA] text-neutral-900 flex font-sans selection:bg-orange-500/30">
+
+      {/* Desktop sidebar — always visible on md+ */}
+      <aside className="w-64 border-r border-black/5 bg-white flex-col hidden md:flex shrink-0">
+        {sidebarContent}
+      </aside>
+
+      {/* Mobile sidebar drawer */}
+      <AnimatePresence>
+        {sidebarOpen && (
+          <>
+            <motion.button
+              type="button"
+              key="studio-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              aria-label="Close sidebar"
+              onClick={() => setSidebarOpen(false)}
+              className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden"
+            />
+            <motion.aside
+              key="studio-drawer"
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+              className="fixed top-0 left-0 bottom-0 z-50 w-[78vw] max-w-xs bg-white shadow-2xl md:hidden flex flex-col"
+            >
+              {sidebarContent}
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* MAIN CONTENT AREA */}
-      <div className="flex-1 flex flex-col h-screen overflow-y-auto">
-        
+      <div className="flex-1 flex flex-col h-screen overflow-y-auto min-w-0">
+
         {/* Header */}
-        <header className="h-16 border-b border-black/5 bg-white/50 backdrop-blur-xl sticky top-0 z-20 flex items-center px-8 justify-between">
-          <h2 className="text-lg font-semibold capitalize text-neutral-800">{tabs.find(t => t.id === activeTab)?.label}</h2>
-          
-          <div className="flex items-center gap-4 text-sm font-medium">
-             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-orange-50 border border-orange-100 text-orange-700 shadow-sm">
-               <Coins className="w-4 h-4 text-orange-500" strokeWidth={2.25} />
-               {user?.creditsBalance?.toLocaleString()} Credits
-             </div>
+        <header className="h-14 md:h-16 border-b border-black/5 bg-white/50 backdrop-blur-xl sticky top-0 z-20 flex items-center px-4 md:px-8 justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Open menu"
+              className="md:hidden w-9 h-9 rounded-full flex items-center justify-center hover:bg-neutral-100 transition-colors shrink-0"
+            >
+              <Menu className="w-5 h-5 text-neutral-800" />
+            </button>
+            <h2 className="text-base md:text-lg font-semibold capitalize text-neutral-800 truncate">{tabs.find(t => t.id === activeTab)?.label}</h2>
+          </div>
+
+          <div className="flex items-center gap-4 text-sm font-medium shrink-0">
+            <div className="flex items-center gap-1.5 px-2.5 md:px-3 py-1.5 rounded-full bg-orange-50 border border-orange-100 text-orange-700 shadow-sm">
+              <Coins className="w-4 h-4 text-orange-500" strokeWidth={2.25} />
+              <span className="whitespace-nowrap">
+                <span className="hidden sm:inline">{user?.creditsBalance?.toLocaleString()} Credits</span>
+                <span className="sm:hidden">{user?.creditsBalance?.toLocaleString()}</span>
+              </span>
+            </div>
           </div>
         </header>
 
         {/* Content Views */}
-        <main className="p-8 max-w-5xl mx-auto w-full pb-20">
+        <main className="px-4 sm:px-6 md:px-8 py-6 md:py-8 max-w-5xl mx-auto w-full pb-20">
           <AnimatePresence mode="wait">
             {activeTab === 'playground' && <PlaygroundView key="playground" text={text} setText={setText} user={user} setUser={setUser} />}
             {activeTab === 'billing'    && <BillingView   key="billing"    user={user} setUser={setUser} />}
@@ -925,24 +990,24 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
           })}
         </div>
       )}
-      <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
+      <div className="mb-6 md:mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold mb-2 bg-gradient-to-br from-neutral-900 to-neutral-500 bg-clip-text text-transparent">Voice Studio</h1>
-          <p className="text-neutral-500">Design studio-grade voiceovers or transcribe audio with pinpoint accuracy.</p>
+          <h1 className="text-2xl sm:text-3xl font-semibold mb-1.5 sm:mb-2 bg-gradient-to-br from-neutral-900 to-neutral-500 bg-clip-text text-transparent">Voice Studio</h1>
+          <p className="text-sm sm:text-base text-neutral-500">Design studio-grade voiceovers or transcribe audio with pinpoint accuracy.</p>
         </div>
-        <div className="flex bg-neutral-100 p-1.5 rounded-full w-fit shadow-inner border border-black/5 relative">
-          <button 
+        <div className="flex bg-neutral-100 p-1.5 rounded-full w-full sm:w-fit shadow-inner border border-black/5 relative">
+          <button
             onClick={() => setSttMode('tts')}
-            className={`relative px-6 py-2.5 rounded-full text-sm font-semibold transition-colors z-10 ${sttMode === 'tts' ? 'text-white' : 'text-neutral-500 hover:text-neutral-700'}`}
+            className={`relative flex-1 sm:flex-none px-4 sm:px-6 py-2 sm:py-2.5 rounded-full text-xs sm:text-sm font-semibold transition-colors z-10 whitespace-nowrap ${sttMode === 'tts' ? 'text-white' : 'text-neutral-500 hover:text-neutral-700'}`}
           >
             {sttMode === 'tts' && (
               <motion.div layoutId="modePill" className="absolute inset-0 bg-neutral-900 rounded-full shadow-md z-[-1]" transition={{ type: "spring", bounce: 0.2, duration: 0.5 }} />
             )}
             Text to Speech
           </button>
-          <button 
+          <button
             onClick={() => setSttMode('stt')}
-            className={`relative px-6 py-2.5 rounded-full text-sm font-semibold transition-colors z-10 ${sttMode === 'stt' ? 'text-white' : 'text-neutral-500 hover:text-neutral-700'}`}
+            className={`relative flex-1 sm:flex-none px-4 sm:px-6 py-2 sm:py-2.5 rounded-full text-xs sm:text-sm font-semibold transition-colors z-10 whitespace-nowrap ${sttMode === 'stt' ? 'text-white' : 'text-neutral-500 hover:text-neutral-700'}`}
           >
             {sttMode === 'stt' && (
               <motion.div layoutId="modePill" className="absolute inset-0 bg-neutral-900 rounded-full shadow-md z-[-1]" transition={{ type: "spring", bounce: 0.2, duration: 0.5 }} />
@@ -959,20 +1024,20 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
           animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
           exit={{ opacity: 0, y: -15, filter: 'blur(8px)' }}
           transition={{ duration: 0.3, ease: 'easeInOut' }}
-          className={`grid grid-cols-1 ${sttMode === 'tts' ? 'lg:grid-cols-3' : 'lg:grid-cols-1 max-w-4xl mx-auto w-full'} gap-8`}
+          className={`grid grid-cols-1 ${sttMode === 'tts' ? 'lg:grid-cols-3' : 'lg:grid-cols-1 max-w-4xl mx-auto w-full'} gap-5 md:gap-8`}
         >
         
         {/* LEFT COLUMN: Editor & Output */}
-        <div className={`${sttMode === 'tts' ? 'lg:col-span-2' : ''} flex flex-col gap-6`}>
-          
+        <div className={`${sttMode === 'tts' ? 'lg:col-span-2' : ''} flex flex-col gap-5 md:gap-6`}>
+
           {sttMode === 'tts' ? (
             <>
               {/* Quick Emotion Tags */}
-              <div className="bg-white/60 backdrop-blur-xl border border-black/5 rounded-2xl p-5 shadow-[0_2px_20px_rgba(0,0,0,0.02)]">
+              <div className="bg-white/60 backdrop-blur-xl border border-black/5 rounded-2xl p-4 md:p-5 shadow-[0_2px_20px_rgba(0,0,0,0.02)]">
                 <h3 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3 flex items-center gap-2"><Sparkles className="w-3 h-3 text-orange-500"/> Insert Emotion Tag</h3>
                 <div className="flex flex-wrap gap-2">
                   {EMOTIONS.map(tag => (
-                    <button key={tag} onClick={() => insertTag(tag)} className="px-3 py-1.5 bg-neutral-100/80 hover:bg-orange-100 hover:text-orange-700 text-neutral-600 text-sm font-medium rounded-lg transition-all active:scale-95 border border-black/5 shadow-sm">
+                    <button key={tag} onClick={() => insertTag(tag)} className="px-2.5 sm:px-3 py-1.5 bg-neutral-100/80 hover:bg-orange-100 hover:text-orange-700 text-neutral-600 text-xs sm:text-sm font-medium rounded-lg transition-all active:scale-95 border border-black/5 shadow-sm">
                       +{tag}
                     </button>
                   ))}
@@ -981,28 +1046,28 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
 
               {/* Editor */}
               <div className="bg-white/80 backdrop-blur-2xl border border-black/5 rounded-3xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] overflow-hidden focus-within:ring-4 focus-within:ring-orange-500/10 focus-within:border-orange-500/50 transition-all flex flex-col">
-                <div className="bg-gradient-to-b from-neutral-50/50 to-transparent border-b border-black/5 px-6 py-4 flex items-center justify-between">
-                   <div className="flex items-center gap-3">
-                     <div className="relative flex h-3 w-3">
+                <div className="bg-gradient-to-b from-neutral-50/50 to-transparent border-b border-black/5 px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-2">
+                   <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                     <div className="relative flex h-3 w-3 shrink-0">
                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
                        <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
                      </div>
-                     <span className="text-sm font-semibold text-neutral-700 capitalize">{voice} <span className="text-neutral-400 font-normal">({tone || 'Neutral'})</span></span>
+                     <span className="text-xs sm:text-sm font-semibold text-neutral-700 capitalize truncate">{voice} <span className="text-neutral-400 font-normal">({tone || 'Neutral'})</span></span>
                    </div>
-                   <span className="text-xs font-medium bg-neutral-100 text-neutral-500 px-2.5 py-1 rounded-md">{text.length} / 5000</span>
+                   <span className="text-[10px] sm:text-xs font-medium bg-neutral-100 text-neutral-500 px-2 sm:px-2.5 py-1 rounded-md whitespace-nowrap">{text.length} / 5000</span>
                 </div>
-                <textarea 
+                <textarea
                   ref={textareaRef}
-                  className="w-full min-h-[300px] p-6 resize-none bg-transparent focus:outline-none text-lg text-neutral-800 placeholder:text-neutral-300 leading-relaxed"
+                  className="w-full min-h-[220px] sm:min-h-[300px] p-4 sm:p-6 resize-none bg-transparent focus:outline-none text-base sm:text-lg text-neutral-800 placeholder:text-neutral-300 leading-relaxed"
                   placeholder="Type your script here... Try clicking the emotion tags above to add <gasp> or <laugh>."
                   value={text}
                   onChange={(e) => setText(e.target.value)}
                 />
-                <div className="p-4 border-t border-black/5 bg-neutral-50/50">
-                  <button 
+                <div className="p-3 sm:p-4 border-t border-black/5 bg-neutral-50/50">
+                  <button
                     onClick={handleGenerate}
                     disabled={generating || isPlaying || text.length === 0}
-                    className="w-full bg-gradient-to-br from-orange-500 to-amber-500 text-white px-8 py-4 rounded-2xl font-semibold shadow-[0_8px_20px_rgba(249,115,22,0.25)] hover:shadow-[0_12px_25px_rgba(249,115,22,0.35)] transition-all flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full bg-gradient-to-br from-orange-500 to-amber-500 text-white px-4 sm:px-8 py-3.5 sm:py-4 rounded-2xl font-semibold text-sm sm:text-base shadow-[0_8px_20px_rgba(249,115,22,0.25)] hover:shadow-[0_12px_25px_rgba(249,115,22,0.35)] transition-all flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {generating ? <Loader2 className="w-5 h-5 animate-spin" /> : isPlaying ? <><Activity className="w-5 h-5 animate-pulse" /> Playing Live Stream...</> : <><Wand2 className="w-5 h-5" /> Generate Voiceover</>}
                   </button>
@@ -1014,14 +1079,14 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
               {/* STT Panel */}
               <div className="bg-white/80 backdrop-blur-2xl border border-black/5 rounded-3xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] overflow-hidden">
                 {/* Header */}
-                <div className="px-8 pt-8 pb-6 border-b border-black/5 text-center">
-                  <h3 className="text-xl font-bold text-neutral-800 mb-1">Speech to Text</h3>
-                  <p className="text-neutral-500 text-sm">Record your voice or upload a file. 1 credit per character.</p>
+                <div className="px-5 sm:px-8 pt-6 sm:pt-8 pb-4 sm:pb-6 border-b border-black/5 text-center">
+                  <h3 className="text-lg sm:text-xl font-bold text-neutral-800 mb-1">Speech to Text</h3>
+                  <p className="text-neutral-500 text-xs sm:text-sm">Record your voice or upload a file. 1 credit per character.</p>
                 </div>
-                <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="p-4 sm:p-8 grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
 
                   {/* LEFT: Record Live */}
-                  <div className="flex flex-col items-center justify-center gap-5 p-6 bg-neutral-50 rounded-2xl border border-black/5">
+                  <div className="flex flex-col items-center justify-center gap-5 p-5 sm:p-6 bg-neutral-50 rounded-2xl border border-black/5">
                     <p className="text-xs font-semibold text-neutral-400 uppercase tracking-widest">Live Recording</p>
                     {/* Visualizer */}
                     <div className="flex items-end gap-[3px] h-14">
@@ -1062,7 +1127,7 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
                   </div>
 
                   {/* RIGHT: Upload File */}
-                  <div className="flex flex-col items-center justify-center gap-4 p-6 bg-neutral-50 rounded-2xl border border-dashed border-neutral-200">
+                  <div className="flex flex-col items-center justify-center gap-4 p-5 sm:p-6 bg-neutral-50 rounded-2xl border border-dashed border-neutral-200">
                     <p className="text-xs font-semibold text-neutral-400 uppercase tracking-widest">Upload File</p>
                     <div className="w-14 h-14 bg-white rounded-2xl border border-black/8 flex items-center justify-center shadow-sm">
                       <Download className="w-6 h-6 text-neutral-400 rotate-180" />
@@ -1159,7 +1224,7 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
           )}
 
           {/* Output Section */}
-          <div ref={outputRef} className="bg-white/60 backdrop-blur-2xl border border-black/5 rounded-3xl p-6 shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
+          <div ref={outputRef} className="bg-white/60 backdrop-blur-2xl border border-black/5 rounded-3xl p-4 sm:p-6 shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
             <div className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-orange-50 border border-orange-100 text-orange-700 shadow-sm w-fit mb-5 text-xs font-bold uppercase tracking-widest">
                <Activity className="w-4 h-4 text-orange-500" />
                {sttMode === 'tts' ? 'Audio Output' : 'Transcription Output'}
@@ -1175,7 +1240,7 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
                     <div className="w-full">
                       <audio controls src={audioUrl} className="w-full h-12 rounded-lg" />
                     </div>
-                    <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                       <button
                         type="button"
                         onClick={() => handleDirectDownload({
@@ -1183,9 +1248,9 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
                           fallbackUrl: audioUrl,
                           filename: 'linguamic-audio.wav',
                         })}
-                        className="bg-orange-500 text-white flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold shadow-[0_4px_14px_rgba(249,115,22,0.3)] hover:bg-orange-600 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                        className="bg-orange-500 text-white flex items-center gap-2 px-3.5 sm:px-5 py-2.5 rounded-xl font-semibold text-sm shadow-[0_4px_14px_rgba(249,115,22,0.3)] hover:bg-orange-600 transition-all hover:scale-[1.02] active:scale-[0.98]"
                       >
-                        <Download className="w-4 h-4" /> Download WAV
+                        <Download className="w-4 h-4" /> WAV
                       </button>
                       <button
                         type="button"
@@ -1197,10 +1262,10 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
                             });
                           }
                         }}
-                        className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.12)] transition-all ${cloudMp3Url ? 'bg-neutral-900 text-white hover:bg-neutral-800' : 'bg-neutral-200 text-neutral-400 cursor-not-allowed'}`}
+                        className={`flex items-center gap-2 px-3.5 sm:px-5 py-2.5 rounded-xl font-semibold text-sm shadow-[0_4px_14px_rgba(0,0,0,0.12)] transition-all ${cloudMp3Url ? 'bg-neutral-900 text-white hover:bg-neutral-800' : 'bg-neutral-200 text-neutral-400 cursor-not-allowed'}`}
                         aria-disabled={!cloudMp3Url}
                       >
-                        <Download className="w-4 h-4" /> Download MP3
+                        <Download className="w-4 h-4" /> MP3
                       </button>
                       <button
                         type="button"
@@ -1262,8 +1327,8 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
         {sttMode === 'tts' && (
           <div className="lg:col-span-1 space-y-6">
           
-          <div className="bg-white/60 backdrop-blur-2xl border border-black/5 rounded-3xl p-6 shadow-[0_8px_30px_rgba(0,0,0,0.04)] sticky top-24">
-            <h3 className="text-lg font-semibold mb-6 flex items-center gap-2 text-neutral-800"><SlidersHorizontal className="w-5 h-5 text-orange-500"/> Studio Controls</h3>
+          <div className="bg-white/60 backdrop-blur-2xl border border-black/5 rounded-3xl p-4 sm:p-6 shadow-[0_8px_30px_rgba(0,0,0,0.04)] lg:sticky lg:top-24">
+            <h3 className="text-base sm:text-lg font-semibold mb-4 sm:mb-6 flex items-center gap-2 text-neutral-800"><SlidersHorizontal className="w-5 h-5 text-orange-500"/> Studio Controls</h3>
             
             {/* Voice Model Dropdown */}
             <div className="mb-5" ref={voiceRef}>

@@ -268,13 +268,13 @@ export default function Pricing() {
         <div className="absolute top-[-10%] w-[120vw] h-[80vh] bg-gradient-to-br from-orange-400/20 via-orange-300/10 to-transparent blur-[140px]" />
       </div>
 
-      <main className="pt-36 pb-28 px-6 max-w-7xl mx-auto relative z-10 flex flex-col items-center">
+      <main className="pt-28 sm:pt-36 pb-20 sm:pb-28 px-4 sm:px-6 max-w-7xl mx-auto relative z-10 flex flex-col items-center">
         <motion.div
           initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}
-          className="text-center mb-16"
+          className="text-center mb-10 sm:mb-16"
         >
-          <h1 className="text-5xl md:text-6xl font-medium tracking-tight text-[#0A0A0A] mb-6">Pricing built for builders.</h1>
-          <p className="text-xl text-neutral-500 max-w-2xl mx-auto font-light">Launch for free, then scale with a predictable credit system designed to stay 60% cheaper.</p>
+          <h1 className="text-4xl sm:text-5xl md:text-6xl font-medium tracking-tight text-[#0A0A0A] mb-4 sm:mb-6">Pricing built for builders.</h1>
+          <p className="text-base sm:text-xl text-neutral-500 max-w-2xl mx-auto font-light">Launch for free, then scale with a predictable credit system designed to stay 60% cheaper.</p>
         </motion.div>
 
         {/* Active subscriptions — only renders for logged-in users with at least one paid sub. */}
@@ -354,7 +354,7 @@ export default function Pricing() {
           </div>
         )}
 
-        <div className="grid lg:grid-cols-4 md:grid-cols-2 gap-6 w-full">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 w-full">
           {PLAN_DEFINITIONS.map((plan, index) => {
             const isFreePlan = plan.key === 'FREE';
             // A user can stack different tiers but not buy the same tier twice
@@ -414,7 +414,7 @@ export default function Pricing() {
                 initial={{ opacity: 0, y: 24 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.45, delay: 0.1 + index * 0.05 }}
-                className={`${plan.theme} backdrop-blur-2xl border rounded-[2rem] p-7 md:p-8 shadow-[0_18px_50px_-30px_rgba(0,0,0,0.35)] hover:-translate-y-1 transition-all flex flex-col relative overflow-hidden ${isAlreadyHeld ? 'ring-2 ring-green-400/50' : ''}`}
+                className={`${plan.theme} backdrop-blur-2xl border rounded-[1.75rem] sm:rounded-[2rem] p-6 sm:p-7 md:p-8 shadow-[0_18px_50px_-30px_rgba(0,0,0,0.35)] hover:-translate-y-1 transition-all flex flex-col relative overflow-hidden ${isAlreadyHeld ? 'ring-2 ring-green-400/50' : ''}`}
               >
                 <div className={`absolute -top-16 -right-12 h-32 w-32 rounded-full ${plan.highlight} blur-[60px] opacity-70`} />
                 <div className="flex items-center justify-between mb-6 relative z-10">

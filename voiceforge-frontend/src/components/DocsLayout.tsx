@@ -53,20 +53,20 @@ export default function DocsLayout({ title, subtitle, effectiveDate, children }:
     <div className="min-h-screen bg-[#FCFCFD] font-sans">
       <Navbar />
 
-      <header className="relative overflow-hidden pt-36 pb-12">
+      <header className="relative overflow-hidden pt-24 sm:pt-36 pb-8 sm:pb-12">
         <div className="absolute inset-0">
           <div className="absolute -top-32 right-10 h-64 w-64 rounded-full bg-orange-200/40 blur-3xl" />
           <div className="absolute -bottom-24 left-6 h-48 w-48 rounded-full bg-orange-100/60 blur-3xl" />
         </div>
-        <div className="relative mx-auto max-w-4xl px-6">
-          <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.25em] text-neutral-500 shadow-sm">
+        <div className="relative mx-auto max-w-4xl px-4 sm:px-6">
+          <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-[10px] sm:text-xs font-semibold uppercase tracking-[0.25em] text-neutral-500 shadow-sm">
             Documentation
           </span>
-          <h1 className="mt-4 text-4xl font-semibold text-neutral-900 md:text-5xl">{title}</h1>
-          {effectiveDate ? <p className="mt-3 text-sm text-neutral-400">Effective: {effectiveDate}</p> : null}
-          <p className="mt-4 max-w-3xl text-lg text-neutral-600">{subtitle}</p>
+          <h1 className="mt-4 text-3xl sm:text-4xl md:text-5xl font-semibold text-neutral-900">{title}</h1>
+          {effectiveDate ? <p className="mt-3 text-xs sm:text-sm text-neutral-400">Effective: {effectiveDate}</p> : null}
+          <p className="mt-3 sm:mt-4 max-w-3xl text-base sm:text-lg text-neutral-600">{subtitle}</p>
 
-          <div className="mt-6 flex flex-wrap gap-2">
+          <div className="mt-5 sm:mt-6 flex flex-wrap gap-2">
             {navItems.map((item) => {
               const isActive = pathname === item.href;
               return (
@@ -74,7 +74,7 @@ export default function DocsLayout({ title, subtitle, effectiveDate, children }:
                   key={item.href}
                   href={item.href}
                   className={
-                    "rounded-full px-4 py-2 text-sm font-medium transition-colors " +
+                    "rounded-full px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition-colors " +
                     (isActive
                       ? "bg-orange-500 text-white"
                       : "bg-white text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900")
@@ -88,9 +88,9 @@ export default function DocsLayout({ title, subtitle, effectiveDate, children }:
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl px-6 pb-24">
-        <div className="rounded-[2rem] border border-neutral-200 bg-white p-6 shadow-sm md:p-10">
-          <div className="space-y-10">{children}</div>
+      <main className="mx-auto max-w-4xl px-4 sm:px-6 pb-20 sm:pb-24">
+        <div className="rounded-[1.5rem] sm:rounded-[2rem] border border-neutral-200 bg-white p-5 sm:p-6 shadow-sm md:p-10">
+          <div className="space-y-8 sm:space-y-10">{children}</div>
         </div>
       </main>
     </div>

@@ -8,7 +8,7 @@ import logo from '@/assets/linguamicorange copy.png';
 import {
   Mic2, CreditCard, Settings, LogOut,
   Download, ChevronDown, Sparkles, Loader2, Wand2, SlidersHorizontal, Activity,
-  User, CheckCircle2, RefreshCw, Coins, Play, Pause
+  User, CheckCircle2, RefreshCw, Coins, Play, Pause, Bell, X
 } from 'lucide-react';
 import api from '@/lib/api';
 
@@ -55,6 +55,40 @@ type UserProfile = {
 const PLAN_RANK: Record<string, number> = { FREE: 0, STARTER: 1, CREATOR: 2, PRO: 3 };
 const PLAN_PRICES: Record<string, string> = { STARTER: '$4.99', CREATOR: '$18.99', PRO: '$79.99' };
 const FREE_MONTHLY_CREDITS = 10000;
+
+// Surfaces subscriptions whose period ends within the next 3 days so we can
+// nudge the user before auto-renew fires or access lapses. CANCELED subs and
+// autoRenew=false ACTIVE subs surface as "expire"; everything else as "renew".
+const DAY_MS = 24 * 60 * 60 * 1000;
+const RENEWAL_NOTICE_WINDOW_MS = 3 * DAY_MS;
+type RenewalNotice = {
+  subId: string;
+  planKey: string;
+  currentPeriodEnd: string;
+  daysUntil: number;
+  kind: 'renew' | 'expire';
+};
+const getUpcomingNotices = (subs?: Subscription[]): RenewalNotice[] => {
+  if (!subs) return [];
+  const now = Date.now();
+  const out: RenewalNotice[] = [];
+  for (const s of subs) {
+    if (s.status !== 'ACTIVE' && s.status !== 'CANCELED') continue;
+    const end = new Date(s.currentPeriodEnd).getTime();
+    const diff = end - now;
+    if (!Number.isFinite(diff) || diff <= 0 || diff > RENEWAL_NOTICE_WINDOW_MS) continue;
+    const willExpire = s.status === 'CANCELED' || s.autoRenew === false;
+    out.push({
+      subId: s.id,
+      planKey: s.planKey,
+      currentPeriodEnd: s.currentPeriodEnd,
+      daysUntil: Math.max(1, Math.ceil(diff / DAY_MS)),
+      kind: willExpire ? 'expire' : 'renew',
+    });
+  }
+  return out;
+};
+const dismissedNoticeKey = (n: RenewalNotice) => `renewal-notice:${n.subId}:${n.currentPeriodEnd}`;
 
 // Pick a primary plan for theming the hero — the highest-ranked active sub,
 // or FREE if the user has none.
@@ -224,6 +258,28 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
   const chunksRef = useRef<BlobPart[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [vizBars, setVizBars] = useState<number[]>(Array(20).fill(4));
+
+  // Renewal-notice dismissals (per-sub per-period, persisted across reloads).
+  const [dismissedNotices, setDismissedNotices] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem('renewal-notice-dismissed') || '[]';
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) setDismissedNotices(new Set(arr));
+    } catch {/* ignore */}
+  }, []);
+  const dismissNotice = (n: RenewalNotice) => {
+    const key = dismissedNoticeKey(n);
+    setDismissedNotices(prev => {
+      const next = new Set(prev);
+      next.add(key);
+      if (typeof window !== 'undefined') {
+        try { window.localStorage.setItem('renewal-notice-dismissed', JSON.stringify(Array.from(next))); } catch {/* ignore */}
+      }
+      return next;
+    });
+  };
 
   // Dropdown open state
   const [voiceOpen, setVoiceOpen] = useState(false);
@@ -812,8 +868,63 @@ function PlaygroundView({ text, setText, user, setUser }: { text: string; setTex
 
   const formatTime = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
+  const renewalNotices = getUpcomingNotices(user?.subscriptions)
+    .filter(n => !dismissedNotices.has(dismissedNoticeKey(n)));
+
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+      {renewalNotices.length > 0 && (
+        <div className="mb-6 space-y-2">
+          {renewalNotices.map(n => {
+            const isRenew = n.kind === 'renew';
+            const endDate = new Date(n.currentPeriodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+            const planLabel = n.planKey.charAt(0) + n.planKey.slice(1).toLowerCase();
+            return (
+              <div
+                key={n.subId}
+                className={`flex items-center gap-3 px-4 py-3 rounded-2xl border shadow-sm ${
+                  isRenew
+                    ? 'bg-orange-50/60 border-orange-200/70'
+                    : 'bg-amber-50/70 border-amber-300/70'
+                }`}
+              >
+                <Bell className={`w-4 h-4 shrink-0 ${isRenew ? 'text-orange-600' : 'text-amber-700'}`} />
+                <div className="flex-1 text-sm text-neutral-700">
+                  {isRenew ? (
+                    <>
+                      Your <span className="font-semibold">{planLabel}</span> plan auto-renews on{' '}
+                      <span className="font-semibold">{endDate}</span> ({n.daysUntil} day{n.daysUntil === 1 ? '' : 's'} left).
+                      {' '}
+                      <button
+                        onClick={() => setActiveTab('billing')}
+                        className="font-semibold text-orange-700 hover:underline"
+                      >Manage plan</button>
+                    </>
+                  ) : (
+                    <>
+                      Your <span className="font-semibold">{planLabel}</span> plan ends on{' '}
+                      <span className="font-semibold">{endDate}</span> ({n.daysUntil} day{n.daysUntil === 1 ? '' : 's'} left).
+                      {' '}
+                      <button
+                        onClick={() => setActiveTab('billing')}
+                        className="font-semibold text-amber-800 hover:underline"
+                      >Reactivate</button>
+                    </>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => dismissNotice(n)}
+                  aria-label="Dismiss"
+                  className="shrink-0 p-1 rounded-full text-neutral-400 hover:text-neutral-700 hover:bg-black/5 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
       <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold mb-2 bg-gradient-to-br from-neutral-900 to-neutral-500 bg-clip-text text-transparent">Voice Studio</h1>

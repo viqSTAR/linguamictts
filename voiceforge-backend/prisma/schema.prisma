@@ -82,6 +82,11 @@ model Subscription {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
+  // Set by the renewal-notice cron after we email the user about an imminent
+  // renewal/expiry. We re-notify if (currentPeriodEnd - lastRenewalNoticeAt)
+  // is larger than the notice window — i.e. it's a fresh billing period.
+  lastRenewalNoticeAt DateTime?
+
   user User @relation(fields: [userId], references: [id])
 
   @@index([userId, createdAt])

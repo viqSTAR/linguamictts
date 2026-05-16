@@ -6,7 +6,8 @@
   "scripts": {
     "postinstall": "prisma generate",
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js"
+    "dev": "nodemon src/index.js",
+    "cron:renewals": "node src/jobs/check-renewals.js"
   },
   "keywords": [],
   "author": "",
@@ -30,6 +31,7 @@
     "ioredis": "^5.10.1",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",
+    "nodemailer": "^6.9.16",
     "pg": "^8.20.0"
   },
   "devDependencies": {

@@ -62,3 +62,44 @@ services:
         sync: false
       - key: R2_PUBLIC_BASE_URL
         sync: false
+      # ── SMTP (renewal notice emails) ──────────────────────────────────────
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: SMTP_SECURE
+        sync: false
+
+  # Daily cron — emails users 3 days before a plan renews or expires.
+  # Reads from the same database as the web service; SMTP env vars must be
+  # set on this service too (Render does not share env across services).
+  - type: cron
+    name: linguamic-renewal-notices
+    runtime: node
+    plan: free
+    schedule: "0 9 * * *"
+    buildCommand: npm install && npx prisma generate
+    startCommand: node src/jobs/check-renewals.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: SMTP_SECURE
+        sync: false

@@ -224,7 +224,7 @@ function BillingReturn() {
           )}
 
           <p className="text-xs text-neutral-400 mt-8 flex items-center gap-1">
-            <ShieldCheck className="w-3.5 h-3.5" strokeWidth={2.25} /> Secured end-to-end by Linguamic
+            <ShieldCheck className="w-3.5 h-3.5" strokeWidth={2.25} /> Secured end-to-end by LinguaMic
           </p>
         </div>
       </main>

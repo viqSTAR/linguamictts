@@ -166,8 +166,8 @@ export default function Studio() {
     <>
       <div className="p-5 md:p-6 flex items-center justify-between">
         <Link href="/" className="inline-flex items-center gap-2 group w-fit" onClick={() => setSidebarOpen(false)}>
-          <Image src={logo} alt="Linguamic Logo" className="w-7 h-7 md:w-8 md:h-8 object-contain" />
-          <span className="text-lg md:text-xl font-semibold tracking-tight">Linguamic</span>
+          <Image src={logo} alt="LinguaMic Logo" className="w-7 h-7 md:w-8 md:h-8 object-contain" />
+          <span className="text-lg md:text-xl font-semibold tracking-tight">LinguaMic</span>
         </Link>
         <button
           type="button"

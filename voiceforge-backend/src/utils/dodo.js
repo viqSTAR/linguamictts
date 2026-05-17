@@ -163,6 +163,45 @@ const getDodoSubscription = async (subscriptionId) => {
   return client.subscriptions.retrieve(subscriptionId);
 };
 
+// ── Refunds ──────────────────────────────────────────────────────────────────
+// Subscription activations create a Payment under the hood; refunds attach to
+// that payment, not the subscription itself. We look up the latest succeeded
+// payment for the subscription, then refund it. If multiple payments exist
+// (e.g. renewals), we take the EARLIEST succeeded one because the trial-window
+// refund only applies to the initial activation charge.
+const listSubscriptionPayments = async (subscriptionId) => {
+  const client = getClient();
+  // SDK returns a PagePromise — we want a single page of results sorted by
+  // created_at. Default ordering on Dodo is newest-first; we'll re-sort
+  // client-side to be safe.
+  const page = await client.payments.list({
+    subscription_id: subscriptionId,
+    status: 'succeeded',
+  });
+  const items = Array.isArray(page && page.items) ? page.items
+    : Array.isArray(page && page.data) ? page.data
+    : [];
+  return items;
+};
+
+const findActivationPaymentId = async (subscriptionId) => {
+  const payments = await listSubscriptionPayments(subscriptionId);
+  if (!payments.length) return null;
+  const sorted = payments
+    .filter((p) => p && (p.payment_id || p.id))
+    .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+  const oldest = sorted[0];
+  return oldest ? (oldest.payment_id || oldest.id) : null;
+};
+
+const refundPayment = async (paymentId, { reason } = {}) => {
+  const client = getClient();
+  return client.refunds.create({
+    payment_id: paymentId,
+    reason: reason || 'Customer-requested refund within trial window',
+  });
+};
+
 // ── Webhook verification ─────────────────────────────────────────────────────
 // Uses the SDK's built-in Standard Webhooks unwrap. Throws on bad signature
 // or expired timestamp. Caller MUST pass the RAW request body string.
@@ -181,6 +220,9 @@ module.exports = {
   cancelDodoSubscription,
   resumeDodoSubscription,
   getDodoSubscription,
+  listSubscriptionPayments,
+  findActivationPaymentId,
+  refundPayment,
   verifyWebhook,
   lookupPlanByProductId,
   lookupTopUpUsdByProductId,

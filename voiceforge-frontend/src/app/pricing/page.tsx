@@ -10,11 +10,31 @@ type Subscription = {
   planKey: string;
   monthlyCredits: number;
   creditsRemaining: number;
-  status: 'ACTIVE' | 'CANCELED' | 'ON_HOLD' | 'FAILED';
+  status: 'ACTIVE' | 'CANCELED' | 'ON_HOLD' | 'FAILED' | 'REFUNDED';
   autoRenew: boolean;
   currentPeriodEnd: string;
   canceledAt: string | null;
   createdAt: string;
+};
+
+// Trial-window refund policy: first paid sub, <24h old, <5000 credits used
+// from this sub's bucket. The server re-validates authoritatively — this is
+// just the UI gate that decides whether to show the button.
+const REFUND_WINDOW_MS = 24 * 60 * 60 * 1000;
+const REFUND_USAGE_CAP = 5000;
+
+const isRefundEligible = (sub: Subscription, allSubs: Subscription[]): boolean => {
+  if (!['ACTIVE', 'CANCELED', 'ON_HOLD'].includes(sub.status)) return false;
+  // Earliest sub the user has — activeSubs is sorted by createdAt asc, but be
+  // defensive in case ordering ever changes.
+  const earliest = [...allSubs].sort((a, b) =>
+    new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0];
+  if (!earliest || earliest.id !== sub.id) return false;
+  const ageMs = Date.now() - new Date(sub.createdAt).getTime();
+  if (ageMs > REFUND_WINDOW_MS) return false;
+  const used = Math.max(0, sub.monthlyCredits - sub.creditsRemaining);
+  if (used >= REFUND_USAGE_CAP) return false;
+  return true;
 };
 
 const PLAN_DEFINITIONS = [
@@ -31,7 +51,7 @@ const PLAN_DEFINITIONS = [
     theme: 'bg-white/70 border-black/5',
     accent: 'text-emerald-600',
     highlight: 'bg-emerald-50',
-    features: ['Text-to-speech API access', 'Standard voices', 'Community support', 'Usage dashboard'],
+    features: ['Text-to-speech in Studio', 'All 8 standard voices', 'Community support', 'Usage dashboard'],
   },
   {
     key: 'STARTER',
@@ -46,7 +66,7 @@ const PLAN_DEFINITIONS = [
     theme: 'bg-white/80 border-black/5',
     accent: 'text-orange-600',
     highlight: 'bg-orange-50',
-    features: ['All Free features', 'Faster throughput tier', 'API key management', 'Faster support'],
+    features: ['All Free features', 'Faster throughput tier', 'Commercial usage rights', 'Faster support'],
   },
   {
     key: 'CREATOR',
@@ -173,6 +193,44 @@ export default function Pricing() {
     }
   };
 
+  // Server-authoritative refund. We re-confirm with the user, post, and let
+  // the backend re-evaluate the eligibility (UI is advisory).
+  const requestRefund = async (sub: Subscription) => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    const used = Math.max(0, sub.monthlyCredits - sub.creditsRemaining);
+    const ok = window.confirm(
+      `Refund your ${sub.planKey} subscription?\n\n` +
+      `• Plan ends immediately (you keep no further access).\n` +
+      `• Unused credits (${(sub.monthlyCredits - used).toLocaleString()}) from this plan are reversed.\n` +
+      `• Full refund is issued to your original payment method (typically 5–10 business days).\n\n` +
+      `This action cannot be undone.`,
+    );
+    if (!ok) return;
+    setSubBusyId(sub.id);
+    try {
+      const res = await fetch(
+        (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000') +
+          `/billing/subscriptions/${sub.id}/refund`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        },
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Refund failed');
+      } else {
+        alert(data.message || 'Refund issued. It typically settles in 5–10 business days.');
+      }
+      await fetchActiveSubs();
+    } catch {
+      alert('Network error. Try again.');
+    } finally {
+      setSubBusyId(null);
+    }
+  };
+
   const openTopUp = (amountUSD: number, credits: number) => {
     const token = localStorage.getItem('token');
     if (!token) { window.location.href = '/login'; return; }
@@ -290,6 +348,7 @@ export default function Pricing() {
                 const cancelled = s.status === 'CANCELED' || s.autoRenew === false;
                 const onHold = s.status === 'ON_HOLD';
                 const failed = s.status === 'FAILED';
+                const refundEligible = isRefundEligible(s, activeSubs);
                 return (
                   <div key={s.id} className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-4 rounded-2xl border border-black/5 bg-neutral-50/60">
                     <div>
@@ -340,6 +399,16 @@ export default function Pricing() {
                           className="text-xs h-9 px-3 rounded-xl border border-red-200 text-red-700 hover:bg-red-50 transition-colors disabled:opacity-50"
                         >
                           Cancel
+                        </button>
+                      )}
+                      {refundEligible && (
+                        <button
+                          onClick={() => requestRefund(s)}
+                          disabled={subBusyId === s.id}
+                          title="Refund available within 24h of purchase if you've used fewer than 5,000 credits from this plan"
+                          className="text-xs h-9 px-3 rounded-xl bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50"
+                        >
+                          Request refund
                         </button>
                       )}
                     </div>

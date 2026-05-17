@@ -98,8 +98,8 @@ export default function Navbar() {
             transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
           >
             <Link href="/" className="flex items-center gap-2 font-bold text-base md:text-lg tracking-tight hover:opacity-70 transition-opacity">
-              <Image src={logo} alt="Linguamic Logo" className="w-5 h-5 md:w-6 md:h-6 object-contain" />
-              LINGUAMIC
+              <Image src={logo} alt="LinguaMic Logo" className="w-5 h-5 md:w-6 md:h-6 object-contain" />
+              LinguaMic
             </Link>
           </motion.div>
 
@@ -207,8 +207,8 @@ export default function Navbar() {
             >
               <div className="flex items-center justify-between px-5 py-4 border-b border-black/5">
                 <Link href="/" onClick={() => setMobileOpen(false)} className="flex items-center gap-2 font-bold text-base tracking-tight">
-                  <Image src={logo} alt="Linguamic Logo" className="w-5 h-5 object-contain" />
-                  LINGUAMIC
+                  <Image src={logo} alt="LinguaMic Logo" className="w-5 h-5 object-contain" />
+                  LinguaMic
                 </Link>
                 <button
                   type="button"

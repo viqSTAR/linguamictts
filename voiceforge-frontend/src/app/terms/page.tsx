@@ -5,12 +5,13 @@ export default function Terms() {
     <DocsLayout
       title="Terms and Conditions"
       subtitle="By accessing or using LinguaMic you agree to these terms. If you do not agree, do not use the service."
-      effectiveDate="May 9, 2026"
+      effectiveDate="May 16, 2026"
     >
       <DocSection number="01" title="The Service">
         <p>
-          LinguaMic provides AI voice generation (TTS), speech transcription (STT), and voice translation tools through
-          a web-based platform. Access is granted upon payment of applicable subscription or credit fees.
+          LinguaMic provides AI voice generation (text-to-speech) and speech transcription (speech-to-text) through a
+          web-based platform and a programmatic API. Access is granted upon registration; paid usage requires payment
+          of applicable subscription or credit fees.
         </p>
       </DocSection>
 
@@ -20,8 +21,8 @@ export default function Terms() {
 
       <DocSection number="03" title="Credits and Subscriptions">
         <p>
-          LinguaMic operates on a credit-based system. Credits are consumed when you use TTS or STT features. We offer the
-          following plans:
+          LinguaMic operates on a credit-based system. Credits are consumed when you use TTS or STT features. We offer
+          the following plans:
         </p>
         <div className="grid gap-4 md:grid-cols-2">
           <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-5">
@@ -33,16 +34,26 @@ export default function Terms() {
             </ul>
           </div>
           <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-5">
-            <p className="text-sm font-semibold text-neutral-900">Pay As You Go</p>
-            <p className="mt-3 text-sm text-neutral-600">5,000 credits per $1.00</p>
+            <p className="text-sm font-semibold text-neutral-900">Pay As You Go (Permanent Credits)</p>
+            <ul className="mt-3 space-y-2 text-sm text-neutral-600">
+              <li>$1 - 5,000 credits</li>
+              <li>$5 - 25,000 credits</li>
+              <li>$10 - 55,000 credits (bonus)</li>
+            </ul>
           </div>
         </div>
         <div className="rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-neutral-700">
-          Every account also receives 10,000 free credits each month, on every plan, indefinitely.
+          New accounts start with 12,000 free credits for the first month. Every account - free or paid - then receives
+          10,000 free credits at the start of each calendar month, indefinitely.
         </div>
         <p>
-          Monthly subscription credits reset at the start of each billing cycle. Unused credits do not carry over. Pay As
-          You Go credits do not expire.
+          Monthly subscription credits reset at the start of each subscription&apos;s billing period (the anniversary of
+          your purchase). Unused subscription credits do not carry over. Pay As You Go credits never expire and carry
+          over indefinitely.
+        </p>
+        <p className="text-sm text-neutral-600">
+          Credits drain in this order: first your free monthly bucket, then your oldest active subscription, then your
+          oldest top-up.
         </p>
         <div className="rounded-2xl border border-neutral-200 bg-neutral-100 px-4 py-3 text-sm text-neutral-700">
           Users under 18 are required to take parental consent before making any purchases on LinguaMic.
@@ -59,15 +70,18 @@ export default function Terms() {
 
       <DocSection number="05" title="Intellectual Property">
         <p>
-          Audio generated using LinguaMic may be used for personal and commercial purposes. LinguaMic retains no ownership
-          of your generated content. The LinguaMic name, logo, and platform remain our intellectual property.
+          Audio generated using LinguaMic may be used for personal and commercial purposes. LinguaMic retains no
+          ownership of your generated content. The LinguaMic name, logo, and platform remain our intellectual property.
+          LinguaMic is built on open-source TTS technology - see our{" "}
+          <a href="/attributions" className="text-orange-500 hover:text-orange-600">Attributions</a> page for details.
         </p>
       </DocSection>
 
       <DocSection number="06" title="Availability">
         <p>
-          We are an early-stage product. We do not guarantee 100% uptime. We will communicate planned maintenance in
-          advance wherever possible.
+          We are an early-stage product. We do not guarantee 100% uptime. Our TTS engine currently processes one request
+          at a time, so generation latency may rise under load. We will communicate planned maintenance in advance
+          wherever possible.
         </p>
       </DocSection>
 
@@ -84,28 +98,51 @@ export default function Terms() {
       </DocSection>
 
       <DocSection number="09" title="Governing Law">
-        <p>These terms are governed by the laws of India.</p>
+        <p>
+          These terms are governed by the laws of India. Any disputes shall be subject to the exclusive jurisdiction of
+          the courts in Patna, Bihar, India.
+        </p>
       </DocSection>
 
       <DocSection number="10" title="Cancellation and Refund Policy">
         <div className="space-y-3">
           <h3 className="text-base font-semibold text-neutral-900">Cancellations</h3>
           <p>
-            You may cancel your monthly subscription at any time from your account dashboard. Cancellation takes effect
-            at the end of your current billing cycle. You retain access to your credits until the cycle ends. We do not
-            offer prorated refunds for partial months.
+            You may cancel your monthly subscription at any time from your{" "}
+            <a href="/pricing" className="text-orange-500 hover:text-orange-600">pricing dashboard</a> under
+            &quot;Your active plans&quot;. Cancellation takes effect at the end of your current billing cycle. You
+            retain access to your credits until the cycle ends. We do not offer prorated refunds for partial months.
           </p>
         </div>
         <div className="space-y-3">
-          <h3 className="text-base font-semibold text-neutral-900">Refunds</h3>
-          <p>We offer refunds in the following cases only:</p>
+          <h3 className="text-base font-semibold text-neutral-900">Refunds — Automated Trial Window</h3>
+          <p>
+            We offer an automated refund on your very first subscription purchase if{" "}
+            <strong>all</strong> of the following are true:
+          </p>
           <ul className="list-disc space-y-2 pl-5">
-            <li>You were charged incorrectly due to a technical error.</li>
-            <li>You cancel within 24 hours of your first subscription payment and have used fewer than 5,000 credits.</li>
+            <li>It is your <strong>first ever paid subscription</strong> on LinguaMic.</li>
+            <li>You request the refund within <strong>24 hours</strong> of purchase.</li>
+            <li>You have used <strong>fewer than 5,000 credits</strong> from that subscription&apos;s bucket.</li>
           </ul>
           <p>
-            To request a refund email company@linguamic.com with your account details and reason. We will respond within 3
-            business days.
+            When all three conditions are met, a &quot;Request refund&quot; button appears on the subscription card in
+            your pricing dashboard. Clicking it cancels the subscription immediately, reverses any unused credits
+            granted by it, and issues a full refund to your original payment method through our payment processor.
+            Refunds typically settle in your account within 5-10 business days depending on your bank.
+          </p>
+        </div>
+        <div className="space-y-3">
+          <h3 className="text-base font-semibold text-neutral-900">Refunds — Other Cases</h3>
+          <p>
+            Outside the automated trial window, we offer refunds only in the following case:
+          </p>
+          <ul className="list-disc space-y-2 pl-5">
+            <li>You were charged incorrectly due to a technical error on our side.</li>
+          </ul>
+          <p>
+            To request such a refund email <a href="mailto:company@linguamic.com" className="text-orange-500 hover:text-orange-600">company@linguamic.com</a> with
+            your account details and reason. We will respond within 3 business days.
           </p>
           <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600">
             <p>Pay As You Go credits are non-refundable once purchased.</p>
@@ -117,8 +154,8 @@ export default function Terms() {
         <div className="space-y-3">
           <h3 className="text-base font-semibold text-neutral-900">Exceptional Circumstances</h3>
           <p>
-            If LinguaMic experiences extended downtime (more than 48 hours in a billing cycle) due to issues on our side,
-            we will issue credit compensation to affected accounts.
+            If LinguaMic experiences extended downtime (more than 48 hours in a billing cycle) due to issues on our
+            side, we will issue credit compensation to affected accounts.
           </p>
         </div>
       </DocSection>
@@ -145,13 +182,14 @@ export default function Terms() {
       <DocSection number="12" title="Auto-Pay Mandate">
         <p>
           When you purchase a monthly subscription, an automatic payment mandate is activated. Your subscription will
-          renew automatically on the same date each month and the corresponding credits will be added to your account.
+          renew automatically on the anniversary of your purchase each month, and the corresponding credits will be
+          added to your account.
         </p>
         <p>
-          You can cancel or disable the auto-pay mandate at any time from your account dashboard under Settings &gt;
-          Subscription &gt; Manage Auto-Pay. Cancellation of the mandate takes effect immediately and your subscription will
-          not renew at the next billing cycle. You retain access to your current credits until the end of your paid
-          period.
+          You can cancel or disable the auto-pay mandate at any time from the{" "}
+          <a href="/pricing" className="text-orange-500 hover:text-orange-600">pricing page</a> under &quot;Your active
+          plans&quot;. Disabling auto-pay takes effect immediately and your subscription will not renew at the next
+          billing cycle. You retain access to your remaining credits until the end of your paid period.
         </p>
         <div className="rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-neutral-700">
           We will send an email reminder 3 days before each renewal so you are never surprised by a charge.

@@ -173,7 +173,7 @@ export default function Home() {
           <div className="flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.8)] animate-pulse" />
           </div>
-          <span className="text-xs sm:text-sm font-semibold text-neutral-800 tracking-wide uppercase">Linguamic Studio 2.0</span>
+          <span className="text-xs sm:text-sm font-semibold text-neutral-800 tracking-wide uppercase">LinguaMic Studio 2.0</span>
         </motion.div>
 
         <motion.h1
@@ -356,13 +356,13 @@ export default function Home() {
                   <div className="w-6 h-6 rounded-full bg-orange-100 flex items-center justify-center shrink-0 mt-0.5">
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-orange-600"><polyline points="20 6 9 17 4 12"></polyline></svg>
                   </div>
-                  <span className="text-neutral-700 font-medium text-lg">Over 1,200 unique voice profiles across 40 languages.</span>
+                  <span className="text-neutral-700 font-medium text-lg">Eight studio-grade English voices with tunable tone and emotion.</span>
                 </li>
                 <li className="flex items-start gap-4">
                   <div className="w-6 h-6 rounded-full bg-orange-100 flex items-center justify-center shrink-0 mt-0.5">
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-orange-600"><polyline points="20 6 9 17 4 12"></polyline></svg>
                   </div>
-                  <span className="text-neutral-700 font-medium text-lg">Sub-second generation for real-time creative workflows.</span>
+                  <span className="text-neutral-700 font-medium text-lg">Streamed audio output so playback starts before the full clip is rendered.</span>
                 </li>
               </ul>
             </div>
@@ -473,20 +473,21 @@ export default function Home() {
               </div>
               <h3 className="text-2xl sm:text-3xl md:text-4xl font-semibold text-neutral-900 mb-4 sm:mb-6 tracking-tight leading-[1.2]">Flawless transcription and automated subtitling.</h3>
               <p className="text-lg text-neutral-500 leading-relaxed font-light mb-8">
-                Convert any audio or video file into perfectly formatted text in seconds. Our engine automatically identifies speakers, filters out background noise, and accurately transcribes heavy accents.
+                Convert spoken audio into clean text in seconds. Our STT endpoint accepts standard audio formats up to
+                25 MB and returns transcript + duration so you can build captioning, search, and analytics on top.
               </p>
               <ul className="space-y-5">
                 <li className="flex items-start gap-4">
                   <div className="w-6 h-6 rounded-full bg-orange-100 flex items-center justify-center shrink-0 mt-0.5">
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-orange-600"><polyline points="20 6 9 17 4 12"></polyline></svg>
                   </div>
-                  <span className="text-neutral-700 font-medium text-lg">Export to SRT, VTT, and standard document formats.</span>
+                  <span className="text-neutral-700 font-medium text-lg">Plain-text transcripts with precise duration metering.</span>
                 </li>
                 <li className="flex items-start gap-4">
                   <div className="w-6 h-6 rounded-full bg-orange-100 flex items-center justify-center shrink-0 mt-0.5">
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-orange-600"><polyline points="20 6 9 17 4 12"></polyline></svg>
                   </div>
-                  <span className="text-neutral-700 font-medium text-lg">Multi-speaker diarization with 98% accuracy.</span>
+                  <span className="text-neutral-700 font-medium text-lg">Billed per second of audio - 2 credits / sec.</span>
                 </li>
               </ul>
             </div>
@@ -539,14 +540,14 @@ export default function Home() {
           
           <div className="col-span-2 md:col-span-1">
             <div className="flex items-center gap-2 mb-6">
-              <Image src={logo} alt="Linguamic Logo" className="w-8 h-8 object-contain" />
-              <span className="text-xl font-semibold text-white tracking-tight">Linguamic</span>
+              <Image src={logo} alt="LinguaMic Logo" className="w-8 h-8 object-contain" />
+              <span className="text-xl font-semibold text-white tracking-tight">LinguaMic</span>
             </div>
             <p className="text-sm leading-relaxed mb-6 font-light">
               Pioneering the future of digital voice with ultra-realistic, cinematic AI generation.
             </p>
             <div className="text-xs">
-              &copy; {new Date().getFullYear()} Linguamic Inc. All rights reserved.
+              &copy; {new Date().getFullYear()} LinguaMic Inc. All rights reserved.
             </div>
           </div>
 

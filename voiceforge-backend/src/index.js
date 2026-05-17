@@ -66,7 +66,7 @@ app.use(express.json({ limit: '256kb' }));
 
 // ── Health ────────────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', message: 'Linguamic Backend is running' });
+  res.json({ status: 'ok', message: 'LinguaMic Backend is running' });
 });
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────

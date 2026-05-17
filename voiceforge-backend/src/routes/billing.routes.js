@@ -7,6 +7,8 @@ const {
   resumeSubscription,
   setAutoPay,
   createDodoCheckout,
+  getRefundEligibility,
+  refundSubscription,
 } = require('../controllers/billing.controller');
 const { verifyToken } = require('../middlewares/auth.middleware');
 
@@ -30,5 +32,7 @@ router.get('/subscriptions', getSubscriptions);
 router.post('/subscriptions/:subscriptionId/cancel', cancelSubscription);
 router.post('/subscriptions/:subscriptionId/resume', resumeSubscription);
 router.post('/subscriptions/:subscriptionId/autopay', setAutoPay);
+router.get('/subscriptions/:subscriptionId/refund-eligibility', getRefundEligibility);
+router.post('/subscriptions/:subscriptionId/refund', refundSubscription);
 
 module.exports = router;

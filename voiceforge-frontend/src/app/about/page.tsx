@@ -16,9 +16,9 @@ export default function AboutUs() {
     <DocsLayout title="About Us" subtitle="Your voice, any language, any emotion.">
       <DocSection number="01" title="What We Do">
         <p>
-          LinguaMic is an AI-powered voice platform built for creators, professionals, and anyone who works across
-          languages. We provide text-to-speech, speech-to-text, and real-time voice translation tools designed to make
-          communication effortless and natural.
+          LinguaMic is an AI-powered voice platform built for creators, professionals, and anyone who works with
+          audio. We provide text-to-speech and speech-to-text tools designed to make voice generation effortless and
+          natural.
         </p>
         <p>
           We are an early-stage startup founded by <strong>Abhishek</strong> and <strong>Vikashdeep</strong>, building from

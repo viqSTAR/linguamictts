@@ -1,6 +1,13 @@
 const prisma = require('../utils/prisma');
 const { getMonthKey, addMonthsUtc } = require('../utils/credits');
 const dodo = require('../utils/dodo');
+const {
+  sendPurchaseConfirmation,
+  sendRefundConfirmation,
+  sendRenewalReceipt,
+  sendTopUpConfirmation,
+  sendCancellationAck,
+} = require('../utils/mailer');
 
 // ─── Plan + top-up config (single source of truth) ────────────────────────────
 const PLAN_CONFIG = {
@@ -16,6 +23,14 @@ const TOPUP_CONFIG = [
 ];
 
 const MAX_TOPUP_USD = 1000;
+
+// ─── Trial-window refund policy ──────────────────────────────────────────────
+// Public policy (see /terms): on the user's first ever paid subscription, if
+// they request a refund within 24h of purchase AND have used fewer than
+// REFUND_USAGE_CAP credits from that subscription's bucket, we issue an
+// automatic full refund and reverse the unused credits.
+const REFUND_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+const REFUND_USAGE_CAP = 5000;                // credits drained from this sub
 
 const getTopUpCredits = (amountUSD) => {
   const tier = TOPUP_CONFIG.find(t => t.amountUSD === amountUSD);
@@ -248,6 +263,26 @@ const processDodoEvent = async (event) => {
       if (isDuplicateTxn(err)) return; // replay — addon grant or marker already exists
       throw err;
     }
+
+    // Top-up receipt — best-effort. Refetch the user to grab the post-grant
+    // balance so the email shows the right "new balance" number.
+    try {
+      const buyer = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { email: true, name: true, creditsBalance: true },
+      });
+      if (buyer && buyer.email) {
+        await sendTopUpConfirmation({
+          to: buyer.email,
+          name: buyer.name,
+          amountUSD,
+          credits,
+          newBalance: buyer.creditsBalance,
+        });
+      }
+    } catch (mailErr) {
+      console.error('[webhook] top-up email failed (non-fatal):', mailErr.message);
+    }
     return;
   }
 
@@ -284,6 +319,10 @@ const processDodoEvent = async (event) => {
     });
     if (existingMarker) return; // replay — already applied
 
+    let wasActivation = false;
+    let wasRenewal = false;
+    let activationPeriodEnd = null;
+    let renewalPeriodEnd = null;
     try {
       await prisma.$transaction(async (tx) => {
         const existing = await tx.subscription.findUnique({
@@ -305,7 +344,10 @@ const processDodoEvent = async (event) => {
 
         let delta;
         if (existing) {
-          // Renewal (or replay we already filtered above — defensive)
+          // Renewal (or replay we already filtered above — defensive). Only
+          // fire the renewal-receipt email on the `subscription.renewed`
+          // event, not on a duplicate `subscription.active` for the same row
+          // (which can happen on edge-case webhook retries).
           delta = config.monthlyCredits - existing.creditsRemaining;
           await tx.subscription.update({
             where: { id: existing.id },
@@ -319,6 +361,10 @@ const processDodoEvent = async (event) => {
               canceledAt: null,
             },
           });
+          if (type === 'subscription.renewed') {
+            wasRenewal = true;
+            renewalPeriodEnd = nextPeriodEnd;
+          }
         } else {
           // Activation — brand-new subscription. createdAt set to now defines
           // its position in the FIFO drain order.
@@ -335,6 +381,8 @@ const processDodoEvent = async (event) => {
               dodoSubscriptionId: data.subscription_id,
             },
           });
+          wasActivation = true;
+          activationPeriodEnd = nextPeriodEnd;
         }
 
         await tx.creditTransaction.create({
@@ -362,6 +410,43 @@ const processDodoEvent = async (event) => {
     } catch (err) {
       if (isDuplicateTxn(err)) return; // raced — another worker applied it
       throw err;
+    }
+
+    // Fire the appropriate email — purchase-confirmation on first activation,
+    // renewal-receipt on a successful monthly renewal. The daily cron's 3-day
+    // reminder is unchanged and runs independently. Both are best-effort: a
+    // mail failure here must not retry the whole webhook (credits already
+    // granted).
+    if (wasActivation || wasRenewal) {
+      try {
+        const buyer = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { email: true, name: true },
+        });
+        if (buyer && buyer.email) {
+          if (wasActivation) {
+            await sendPurchaseConfirmation({
+              to: buyer.email,
+              name: buyer.name,
+              planKey,
+              monthlyCredits: config.monthlyCredits,
+              priceUSD: config.priceUSD,
+              currentPeriodEnd: activationPeriodEnd,
+            });
+          } else {
+            await sendRenewalReceipt({
+              to: buyer.email,
+              name: buyer.name,
+              planKey,
+              monthlyCredits: config.monthlyCredits,
+              priceUSD: config.priceUSD,
+              currentPeriodEnd: renewalPeriodEnd,
+            });
+          }
+        }
+      } catch (mailErr) {
+        console.error('[webhook] subscription email failed (non-fatal):', mailErr.message);
+      }
     }
     return;
   }
@@ -560,6 +645,9 @@ const cancelSubscription = async (req, res) => {
     const sub = await loadSubscriptionForUser(req, res);
     if (!sub) return;
 
+    if (sub.status === 'REFUNDED') {
+      return res.status(400).json({ error: 'Subscription was refunded and is no longer active.' });
+    }
     if (sub.status === 'CANCELED' || sub.autoRenew === false) {
       return res.status(400).json({
         error: 'Subscription is already cancelled.',
@@ -608,6 +696,24 @@ const cancelSubscription = async (req, res) => {
       },
     });
 
+    // Cancellation acknowledgement — best-effort.
+    try {
+      const buyer = await prisma.user.findUnique({
+        where: { id: req.userId },
+        select: { email: true, name: true },
+      });
+      if (buyer && buyer.email) {
+        await sendCancellationAck({
+          to: buyer.email,
+          name: buyer.name,
+          planKey: updated.planKey,
+          currentPeriodEnd: updated.currentPeriodEnd,
+        });
+      }
+    } catch (mailErr) {
+      console.error('[cancel] ack email failed (non-fatal):', mailErr.message);
+    }
+
     res.json({
       message: 'Subscription cancelled. You keep access until the end of your billing period.',
       subscription: updated,
@@ -629,7 +735,7 @@ const resumeSubscription = async (req, res) => {
     if (sub.status === 'ACTIVE' && sub.autoRenew) {
       return res.status(400).json({ error: 'Subscription is already active.' });
     }
-    if (sub.status === 'EXPIRED' || sub.status === 'FAILED') {
+    if (sub.status === 'EXPIRED' || sub.status === 'FAILED' || sub.status === 'REFUNDED') {
       return res.status(400).json({ error: 'Subscription is no longer resumable.' });
     }
 
@@ -689,7 +795,7 @@ const setAutoPay = async (req, res) => {
     if (sub.currentPeriodEnd && sub.currentPeriodEnd <= new Date()) {
       return res.status(400).json({ error: 'Billing period has ended.' });
     }
-    if (sub.status === 'EXPIRED' || sub.status === 'FAILED') {
+    if (sub.status === 'EXPIRED' || sub.status === 'FAILED' || sub.status === 'REFUNDED') {
       return res.status(400).json({ error: 'Subscription is no longer adjustable.' });
     }
 
@@ -735,6 +841,28 @@ const setAutoPay = async (req, res) => {
       },
     });
 
+    // When the user disables auto-pay we treat it as a cancellation for
+    // email-comms purposes — same outcome (plan ends at period end). Re-enable
+    // is silent; users who flip it back don't need a confirmation spam.
+    if (!enabled) {
+      try {
+        const buyer = await prisma.user.findUnique({
+          where: { id: req.userId },
+          select: { email: true, name: true },
+        });
+        if (buyer && buyer.email) {
+          await sendCancellationAck({
+            to: buyer.email,
+            name: buyer.name,
+            planKey: updated.planKey,
+            currentPeriodEnd: updated.currentPeriodEnd,
+          });
+        }
+      } catch (mailErr) {
+        console.error('[autopay-off] ack email failed (non-fatal):', mailErr.message);
+      }
+    }
+
     res.json({
       message: enabled
         ? 'Auto-pay enabled.'
@@ -744,6 +872,269 @@ const setAutoPay = async (req, res) => {
   } catch (error) {
     console.error('setAutoPay error:', error);
     res.status(500).json({ error: 'Failed to update auto-pay setting' });
+  }
+};
+
+// ─── Trial-window refund (24h / <5k credits used) ────────────────────────────
+// Eligibility, evaluated authoritatively on the server (the UI mirrors this
+// for the button, but we re-check here so a stale UI can't force a refund):
+//   1. The subscription belongs to req.userId.
+//   2. It's in a refundable state (ACTIVE / CANCELED / ON_HOLD — not already
+//      EXPIRED, FAILED, or REFUNDED).
+//   3. It is the user's FIRST ever paid subscription (smallest createdAt
+//      across all of their subs that have a Dodo subscription id).
+//   4. createdAt is within REFUND_WINDOW_MS of now.
+//   5. Credits drained from THIS sub's bucket is below REFUND_USAGE_CAP. We
+//      use (monthlyCredits - creditsRemaining) so we measure usage that was
+//      billed to this specific subscription, not free-tier or addon usage.
+const evaluateRefundEligibility = async (userId, subscription) => {
+  const reasons = [];
+
+  if (!subscription) {
+    return { eligible: false, reasons: ['Subscription not found'] };
+  }
+  if (subscription.userId !== userId) {
+    return { eligible: false, reasons: ['Subscription does not belong to this user'] };
+  }
+
+  const refundableStates = new Set(['ACTIVE', 'CANCELED', 'ON_HOLD']);
+  if (!refundableStates.has(subscription.status)) {
+    reasons.push(`Subscription is in ${subscription.status} state and cannot be refunded`);
+  }
+
+  // First paid subscription: smallest createdAt among the user's subs that
+  // ever made it to Dodo (so failed pre-checkout placeholders don't count).
+  const firstPaidSub = await prisma.subscription.findFirst({
+    where: {
+      userId,
+      dodoSubscriptionId: { not: null },
+    },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, createdAt: true },
+  });
+  if (!firstPaidSub || firstPaidSub.id !== subscription.id) {
+    reasons.push('Trial-window refund applies only to your first paid subscription');
+  }
+
+  const ageMs = Date.now() - new Date(subscription.createdAt).getTime();
+  if (ageMs > REFUND_WINDOW_MS) {
+    reasons.push('Trial-window refund expires 24 hours after purchase');
+  }
+
+  const usedFromThisSub = Math.max(0, subscription.monthlyCredits - subscription.creditsRemaining);
+  if (usedFromThisSub >= REFUND_USAGE_CAP) {
+    reasons.push(`You have used ${usedFromThisSub.toLocaleString()} credits from this plan — refund requires fewer than ${REFUND_USAGE_CAP.toLocaleString()}`);
+  }
+
+  return {
+    eligible: reasons.length === 0,
+    reasons,
+    ageMs,
+    usedFromThisSub,
+    windowMs: REFUND_WINDOW_MS,
+    usageCap: REFUND_USAGE_CAP,
+  };
+};
+
+// GET /billing/subscriptions/:subscriptionId/refund-eligibility
+// Lightweight read used by the frontend to decide whether to render the
+// "Request refund" button. Returns the same fields the POST handler uses to
+// authorize, so the UI can show a precise reason when it's not eligible.
+const getRefundEligibility = async (req, res) => {
+  try {
+    const sub = await prisma.subscription.findUnique({
+      where: { id: req.params.subscriptionId },
+      select: {
+        id: true, userId: true, status: true, createdAt: true,
+        monthlyCredits: true, creditsRemaining: true, dodoSubscriptionId: true,
+        planKey: true,
+      },
+    });
+    if (!sub || sub.userId !== req.userId) {
+      return res.status(404).json({ error: 'Subscription not found' });
+    }
+    const ev = await evaluateRefundEligibility(req.userId, sub);
+    res.json({
+      eligible: ev.eligible,
+      reasons: ev.reasons,
+      ageMs: ev.ageMs,
+      usedFromThisSub: ev.usedFromThisSub,
+      windowMs: ev.windowMs,
+      usageCap: ev.usageCap,
+    });
+  } catch (error) {
+    console.error('getRefundEligibility error:', error);
+    res.status(500).json({ error: 'Failed to evaluate refund eligibility' });
+  }
+};
+
+// POST /billing/subscriptions/:subscriptionId/refund
+//
+// Atomic refund flow:
+//   1. Re-check eligibility on the server (UI is advisory).
+//   2. Look up the activation payment_id from Dodo.
+//   3. Cancel the Dodo subscription immediately (cancel_at_next_billing_date=true)
+//      so it never renews. We can't *terminate* a Dodo sub mid-period, but the
+//      refund itself reverses the only charge that was made.
+//   4. Issue the refund through Dodo.
+//   5. In a DB transaction: mark our subscription REFUNDED, zero its credit
+//      bucket, decrement the user's cached creditsBalance by whatever was left,
+//      and log a CreditTransaction.
+//
+// Ordering note: we do the Dodo refund BEFORE mutating local state so a failed
+// refund doesn't leave the user with no credits AND no money back. If the DB
+// mutation later fails after a successful refund, the user keeps both their
+// money and (briefly) their credits — strictly user-favouring drift that the
+// next webhook (subscription.cancelled) and/or a manual reconcile can clean up.
+const refundSubscription = async (req, res) => {
+  try {
+    if (!dodo.isEnabled()) {
+      return res.status(503).json({ error: 'Refunds are not currently available — please contact support.' });
+    }
+
+    const sub = await prisma.subscription.findUnique({
+      where: { id: req.params.subscriptionId },
+      select: {
+        id: true, userId: true, status: true, createdAt: true,
+        monthlyCredits: true, creditsRemaining: true, dodoSubscriptionId: true,
+        planKey: true,
+      },
+    });
+    if (!sub || sub.userId !== req.userId) {
+      return res.status(404).json({ error: 'Subscription not found' });
+    }
+
+    const ev = await evaluateRefundEligibility(req.userId, sub);
+    if (!ev.eligible) {
+      return res.status(400).json({
+        error: ev.reasons[0] || 'Not eligible for automated refund',
+        reasons: ev.reasons,
+      });
+    }
+
+    if (!sub.dodoSubscriptionId) {
+      return res.status(400).json({ error: 'Subscription is missing a payment-provider reference' });
+    }
+
+    // Find the activation payment so we can refund it.
+    let paymentId;
+    try {
+      paymentId = await dodo.findActivationPaymentId(sub.dodoSubscriptionId);
+    } catch (err) {
+      console.error('Refund: failed to look up activation payment:', err.message);
+      return res.status(502).json({ error: 'Could not reach payment provider to locate original charge' });
+    }
+    if (!paymentId) {
+      return res.status(502).json({ error: 'Could not find the original charge for this subscription' });
+    }
+
+    // Schedule cancellation in Dodo (so it doesn't auto-renew tomorrow). We
+    // tolerate "already cancelled" by reconciling — same shape as the regular
+    // cancel handler.
+    try {
+      await dodo.cancelDodoSubscription(sub.dodoSubscriptionId, { reason: 'refund-issued' });
+    } catch (err) {
+      let reconciled = false;
+      try {
+        const live = await dodo.getDodoSubscription(sub.dodoSubscriptionId);
+        if (live && (live.cancel_at_next_billing_date === true
+          || live.status === 'cancelled'
+          || live.status === 'expired')) {
+          reconciled = true;
+        }
+      } catch (_) { /* ignore */ }
+      if (!reconciled) {
+        console.error('Refund: Dodo cancel failed:', err.message);
+        return res.status(502).json({ error: 'Failed to cancel subscription with payment provider' });
+      }
+    }
+
+    // Issue the refund. If this throws we abort BEFORE mutating local state.
+    let refundResult;
+    try {
+      refundResult = await dodo.refundPayment(paymentId, {
+        reason: `Trial-window refund: ${ev.usedFromThisSub} credits used in first ${Math.round(ev.ageMs / 3600000)}h`,
+      });
+    } catch (err) {
+      console.error('Refund: Dodo refund failed:', err.message);
+      return res.status(502).json({ error: 'Refund could not be processed by payment provider' });
+    }
+
+    // Local state mutation. The refund has already been issued; if this step
+    // fails the next webhook will likely reconcile, but we still surface the
+    // error so it gets logged.
+    try {
+      await prisma.$transaction(async (tx) => {
+        const fresh = await tx.subscription.findUnique({
+          where: { id: sub.id },
+          select: { creditsRemaining: true, status: true },
+        });
+        const refundCreditsAmount = fresh ? fresh.creditsRemaining : 0;
+
+        await tx.subscription.update({
+          where: { id: sub.id },
+          data: {
+            status: 'REFUNDED',
+            autoRenew: false,
+            creditsRemaining: 0,
+            canceledAt: new Date(),
+          },
+        });
+
+        if (refundCreditsAmount > 0) {
+          await tx.user.update({
+            where: { id: sub.userId },
+            data: { creditsBalance: { decrement: refundCreditsAmount } },
+          });
+        }
+
+        await tx.creditTransaction.create({
+          data: {
+            userId: sub.userId,
+            amount: -refundCreditsAmount,
+            type: 'REFUND',
+            description: `Trial-window refund: ${sub.planKey} plan — Dodo refund ${refundResult.refund_id || ''}`,
+            referenceId: refundResult.refund_id || paymentId,
+          },
+        });
+      });
+    } catch (err) {
+      console.error('Refund: local state update failed AFTER successful Dodo refund:', err);
+      return res.status(500).json({
+        error: 'Refund issued but local account update failed — please contact support with this id',
+        refundId: refundResult.refund_id,
+      });
+    }
+
+    // Best-effort refund email. The refund itself has already succeeded by
+    // this point — a mail failure must not turn that into a 500.
+    try {
+      const buyer = await prisma.user.findUnique({
+        where: { id: sub.userId },
+        select: { email: true, name: true },
+      });
+      if (buyer && buyer.email) {
+        const priceUSD = PLAN_CONFIG[sub.planKey] ? PLAN_CONFIG[sub.planKey].priceUSD : null;
+        await sendRefundConfirmation({
+          to: buyer.email,
+          name: buyer.name,
+          planKey: sub.planKey,
+          priceUSD,
+          refundId: refundResult.refund_id,
+        });
+      }
+    } catch (mailErr) {
+      console.error('[refund] confirmation email failed (non-fatal):', mailErr.message);
+    }
+
+    res.json({
+      message: 'Refund issued. It typically settles in 5–10 business days.',
+      refundId: refundResult.refund_id,
+      status: refundResult.status,
+    });
+  } catch (error) {
+    console.error('refundSubscription error:', error);
+    res.status(500).json({ error: 'Failed to process refund' });
   }
 };
 
@@ -759,4 +1150,7 @@ module.exports = {
   cancelSubscription,
   resumeSubscription,
   setAutoPay,
+  // Trial-window refund
+  getRefundEligibility,
+  refundSubscription,
 };

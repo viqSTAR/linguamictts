@@ -98,7 +98,7 @@ export default function Register() {
           
           <div className="flex flex-col items-center text-center mb-10">
             <Link href="/" className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-white shadow-[0_8px_20px_-6px_rgba(249,115,22,0.25)] border border-orange-100 mb-6 hover:scale-105 transition-transform">
-              <Image src={logo} alt="Linguamic" className="w-9 h-9 object-contain" priority />
+              <Image src={logo} alt="LinguaMic" className="w-9 h-9 object-contain" priority />
             </Link>
             <h1 className="text-2xl md:text-3xl font-semibold text-neutral-900 tracking-tight mb-2">Create your account</h1>
             <p className="text-neutral-500 text-sm">Join the future of cinematic digital voice.</p>

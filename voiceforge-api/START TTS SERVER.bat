@@ -1,9 +1,9 @@
 @echo off
-title Linguamic TTS Server
+title LinguaMic TTS Server
 color 0A
 echo.
 echo  ================================================
-echo   LINGUAMIC - Starting TTS Tunnel
+echo   LinguaMic - Starting TTS Tunnel
 echo  ================================================
 echo.
 echo  [1/2] Checking Docker container...

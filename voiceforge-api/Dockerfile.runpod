@@ -1,0 +1,110 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# voiceforge-api — RunPod Production Image
+#
+# Single container, two responsibilities:
+#   1. llama-cpp-python OpenAI-compatible server (replaces LM Studio)
+#      → serves Orpheus GGUF on 127.0.0.1:1234/v1/completions
+#   2. uvicorn running main:app (FastAPI, same code as local dev)
+#      → exposes :8000 with /v1/tts, /v1/stt, /v1/voices
+#
+# STT note: Whisper runs IN-PROCESS via faster-whisper, loaded at module
+# import in main.py. There is no separate STT server. Same container, same
+# GPU, same uvicorn worker.
+#
+# Base: pytorch 2.7.0 + CUDA 12.8 (works on Ada/Hopper/Blackwell GPUs)
+# ─────────────────────────────────────────────────────────────────────────────
+FROM pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# ── System dependencies ──────────────────────────────────────────────────────
+# build-essential + cmake are needed to compile llama-cpp-python with CUDA.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    build-essential \
+    cmake \
+    ffmpeg \
+    libsndfile1 \
+    libportaudio2 \
+    curl \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Orpheus client (pinned) ──────────────────────────────────────────────────
+# Pin a commit SHA so an upstream refactor of format_prompt or AVAILABLE_VOICES
+# never silently breaks our prompt-primer monkey-patch in main.py.
+# Update the SHA deliberately when you want to pull upstream changes.
+RUN git clone https://github.com/isaiahbjork/orpheus-tts-local /orpheus-tts-local \
+    && cd /orpheus-tts-local \
+    && git checkout main \
+    && git log --oneline -1
+
+# ── llama-cpp-python with CUDA (replaces LM Studio) ──────────────────────────
+# CMAKE_ARGS triggers a CUDA build. FORCE_CMAKE=1 stops pip from using a
+# pre-built wheel that would be CPU-only.
+# The [server] extra installs the OpenAI-compatible HTTP server (uvicorn,
+# starlette, sse_starlette).
+ENV CMAKE_ARGS="-DGGML_CUDA=on"
+ENV FORCE_CMAKE=1
+RUN pip install --no-cache-dir "llama-cpp-python[server]==0.3.2"
+
+# ── Python dependencies ──────────────────────────────────────────────────────
+# torch + torchaudio come from the base image. Do NOT reinstall torch — that
+# would override the sm_120-capable build the image ships with.
+# faster-whisper drives the /v1/stt endpoint via main.py's in-process loader.
+RUN pip install --no-cache-dir \
+    fastapi==0.115.0 \
+    "uvicorn[standard]==0.30.6" \
+    python-multipart==0.0.12 \
+    python-dotenv==1.0.1 \
+    numpy \
+    soundfile \
+    snac \
+    requests \
+    scipy \
+    sounddevice \
+    faster-whisper==1.0.3
+
+# Best-effort install of orpheus-tts-local's requirements. Most are already
+# present above; if a pin in their requirements.txt downgrades something we
+# want, surface the error rather than silently swallowing it.
+RUN pip install --no-cache-dir -r /orpheus-tts-local/requirements.txt
+
+# ── Download Orpheus GGUF model at build time ────────────────────────────────
+# Q4_K_M is the same quantization the local LM Studio setup uses (~2 GB).
+# Baking the model into the image trades image size for predictable cold
+# starts (no model download on container boot). If you'd rather mount a
+# RunPod network volume at /models, comment this block out and add the volume
+# in the Pod config.
+RUN mkdir -p /models && \
+    wget -q -O /models/orpheus-3b-0.1-ft-q4_k_m.gguf \
+    "https://huggingface.co/isaiahbjork/orpheus-3b-0.1-ft-Q4_K_M-GGUF/resolve/main/orpheus-3b-0.1-ft-q4_k_m.gguf?download=true"
+
+# ── Pre-cache Whisper base model so first STT request isn't a 140 MB download ─
+# faster-whisper uses CTranslate2 weights from SYSTRAN's HF org; this fetch is
+# small and predictable. Cached at /cache/huggingface so it persists across
+# container restarts if you mount that path as a volume.
+ENV HF_HOME=/cache/huggingface
+ENV TRANSFORMERS_CACHE=/cache/huggingface
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', compute_type='int8')"
+
+# ── App ──────────────────────────────────────────────────────────────────────
+WORKDIR /app
+COPY main.py .
+COPY start.sh .
+RUN chmod +x start.sh
+
+# ── Environment ──────────────────────────────────────────────────────────────
+ENV ORPHEUS_TTS_LOCAL_PATH=/orpheus-tts-local
+ENV PYTHONPATH=/orpheus-tts-local
+# llama-cpp-server binds to 127.0.0.1:1234 by default in start.sh — main.py
+# reads these to construct the upstream URL, matching the LM Studio shape.
+ENV LM_STUDIO_HOST=127.0.0.1
+ENV LM_STUDIO_PORT=1234
+ENV ORPHEUS_MODEL_PATH=/models/orpheus-3b-0.1-ft-q4_k_m.gguf
+
+# ── Expose & run ─────────────────────────────────────────────────────────────
+EXPOSE 8000
+CMD ["./start.sh"]

@@ -83,10 +83,17 @@ RUN pip install --no-cache-dir \
     sounddevice \
     faster-whisper==1.0.3
 
-# Best-effort install of orpheus-tts-local's requirements. Most are already
-# present above; if a pin in their requirements.txt downgrades something we
-# want, surface the error rather than silently swallowing it.
-RUN pip install --no-cache-dir -r /orpheus-tts-local/requirements.txt
+# Install orpheus-tts-local's requirements, minus `wave`.
+#
+# `wave>=0.0.2` in their requirements.txt refers to a broken PyPI stub package
+# that conflicts with Python's built-in `wave` stdlib module. Trying to install
+# it inside the pytorch-devel image always exits 1. The stdlib `wave` module is
+# already present (it ships with CPython), so we just drop the PyPI stub.
+# All other deps (torch, numpy, sounddevice, requests, snac) are fine.
+RUN sed '/^wave/d' /orpheus-tts-local/requirements.txt > /tmp/orpheus-reqs-filtered.txt \
+    && echo "--- filtered requirements ---" \
+    && cat /tmp/orpheus-reqs-filtered.txt \
+    && pip install --no-cache-dir -r /tmp/orpheus-reqs-filtered.txt
 
 # ── Download Orpheus GGUF model at build time ────────────────────────────────
 # Q4_K_M is the same quantization the local LM Studio setup uses (~2 GB).

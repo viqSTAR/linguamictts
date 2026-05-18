@@ -36,10 +36,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Pin a commit SHA so an upstream refactor of format_prompt or AVAILABLE_VOICES
 # never silently breaks our prompt-primer monkey-patch in main.py.
 # Update the SHA deliberately when you want to pull upstream changes.
+ARG ORPHEUS_TTS_LOCAL_SHA=9d6d604dc662406cbd6d00b0fb5272375c7720b6
 RUN git clone https://github.com/isaiahbjork/orpheus-tts-local /orpheus-tts-local \
     && cd /orpheus-tts-local \
-    && git checkout main \
+    && git checkout ${ORPHEUS_TTS_LOCAL_SHA} \
     && git log --oneline -1
+
+# ── Patch upstream: add a connect/read timeout to the LM-Studio HTTP call ────
+# Without this, if llama-cpp-server hangs partway through generation the
+# FastAPI worker blocks indefinitely (no chunked-output watchdog upstream).
+# (5, 180) = 5s connect timeout, 180s read timeout — long enough for a full
+# 8000-token generation, short enough to fail-fast on a wedged server.
+RUN sed -i \
+    's|requests.post(API_URL, headers=HEADERS, json=payload, stream=True)|requests.post(API_URL, headers=HEADERS, json=payload, stream=True, timeout=(5, 180))|' \
+    /orpheus-tts-local/gguf_orpheus.py \
+    && grep -n "requests.post" /orpheus-tts-local/gguf_orpheus.py
 
 # ── llama-cpp-python with CUDA (replaces LM Studio) ──────────────────────────
 # CMAKE_ARGS triggers a CUDA build. FORCE_CMAKE=1 stops pip from using a

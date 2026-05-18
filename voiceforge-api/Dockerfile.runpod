@@ -12,8 +12,13 @@
 # GPU, same uvicorn worker.
 #
 # Base: pytorch 2.7.0 + CUDA 12.8 (works on Ada/Hopper/Blackwell GPUs)
+#
+# We use the -devel variant rather than -runtime because llama-cpp-python is
+# compiled from source against CUDA (CMAKE_ARGS="-DGGML_CUDA=on") and needs
+# nvcc + CUDA dev headers, which the runtime image strips out. Devel image
+# is ~3-4 GB bigger, but the final wheel works and the build is reproducible.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime
+FROM pytorch/pytorch:2.7.0-cuda12.8-cudnn9-devel
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1

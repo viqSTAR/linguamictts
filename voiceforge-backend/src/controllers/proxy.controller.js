@@ -22,6 +22,47 @@ const FASTAPI_INTERNAL_KEY = process.env.FASTAPI_INTERNAL_KEY || 'default_dev_ke
 // so the request actually reaches FastAPI.
 const NGROK_BYPASS_HEADER = { 'ngrok-skip-browser-warning': 'true' };
 
+// ── RunPod Serverless mode ──────────────────────────────────────────────────
+// When both vars are set, all TTS/STT/Voices calls go through RunPod's job API
+// instead of directly to FastAPI. Set in Render env vars after deploying the
+// RunPod endpoint. Leave unset for local dev (falls back to direct HTTP).
+const RUNPOD_ENDPOINT_ID = process.env.RUNPOD_ENDPOINT_ID || '';
+const RUNPOD_API_KEY     = process.env.RUNPOD_API_KEY     || '';
+const USE_RUNPOD = Boolean(RUNPOD_ENDPOINT_ID && RUNPOD_API_KEY);
+
+/**
+ * Call the RunPod /runsync endpoint and return the parsed output object.
+ * Throws on network error; returns { error } on RunPod-level failure.
+ *
+ * @param {object} input - Job input sent as { input: <input> }
+ * @param {number} [timeoutMs=310000] - Axios timeout in ms (slightly > RunPod's max 300 s)
+ */
+async function runpodCall(input, timeoutMs = 310000) {
+  const url = `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/runsync`;
+  const resp = await axios.post(
+    url,
+    { input },
+    {
+      headers: {
+        Authorization: `Bearer ${RUNPOD_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: timeoutMs,
+      validateStatus: () => true,
+    },
+  );
+
+  if (resp.status !== 200) {
+    throw new Error(`RunPod HTTP ${resp.status}: ${JSON.stringify(resp.data).slice(0, 300)}`);
+  }
+
+  const body = resp.data;
+  if (body.status === 'FAILED' || body.status === 'CANCELLED') {
+    return { error: `RunPod job ${body.status}: ${body.error || 'unknown'}` };
+  }
+  return body.output || {};
+}
+
 const DEMO_MAX_CHARS = 500;
 const DEMO_ALLOWED_KEYS = new Set([
   'text',
@@ -153,41 +194,81 @@ const performBilledTts = async ({ req, res, userId, apiKeyId, endpointType }) =>
     return null;
   }
 
-  let response;
-  try {
-    response = await axios.post(`${FASTAPI_URL}/v1/tts`, req.body, {
-      headers: {
-        'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}`,
-        'Content-Type': 'application/json',
-        ...NGROK_BYPASS_HEADER,
-      },
-      responseType: 'stream',
-      validateStatus: () => true,
-    });
-  } catch (err) {
-    await refundCredits(userId, expectedCredits);
-    console.error(`${endpointType} upstream error:`, err.message);
-    res.status(502).json({ error: 'Failed to reach TTS engine' });
-    return null;
-  }
+  // ── Call TTS engine (RunPod Serverless or direct FastAPI) ─────────────────
+  let fastapiCredits, fastapiCharCount, fastapiEmotion, tone;
+  let audioStream; // Readable stream of WAV bytes forwarded to callers
 
-  if (response.status !== 200) {
-    await refundCredits(userId, expectedCredits);
-    res.status(response.status);
-    for (const [key, value] of Object.entries(response.headers)) {
-      res.setHeader(key, value);
+  if (USE_RUNPOD) {
+    // RunPod Serverless: synchronous job, audio returned as base64.
+    let output;
+    try {
+      output = await runpodCall({ action: 'tts', ...req.body });
+    } catch (err) {
+      await refundCredits(userId, expectedCredits);
+      console.error(`${endpointType} RunPod error:`, err.message);
+      res.status(502).json({ error: 'Failed to reach TTS engine (RunPod)' });
+      return null;
     }
-    response.data.pipe(res);
-    return null;
+
+    if (output.error) {
+      await refundCredits(userId, expectedCredits);
+      res.status(500).json({ error: output.error });
+      return null;
+    }
+
+    const audioBuffer = Buffer.from(output.audio_base64 || '', 'base64');
+    fastapiCredits   = output.credits_deducted   || 0;
+    fastapiCharCount = output.char_count          || 0;
+    fastapiEmotion   = output.emotion_tag_count   || 0;
+    tone             = output.tone                || null;
+
+    // Wrap buffer in a Readable so callers can .pipe() it exactly like an
+    // axios streaming response — no callers need to change.
+    const { Readable } = require('stream');
+    const readable = new Readable({ read() {} });
+    readable.push(audioBuffer);
+    readable.push(null);
+    audioStream = { data: readable, headers: {} };
+
+  } else {
+    // Direct FastAPI (local dev / plain Pod).
+    let response;
+    try {
+      response = await axios.post(`${FASTAPI_URL}/v1/tts`, req.body, {
+        headers: {
+          'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}`,
+          'Content-Type': 'application/json',
+          ...NGROK_BYPASS_HEADER,
+        },
+        responseType: 'stream',
+        validateStatus: () => true,
+      });
+    } catch (err) {
+      await refundCredits(userId, expectedCredits);
+      console.error(`${endpointType} upstream error:`, err.message);
+      res.status(502).json({ error: 'Failed to reach TTS engine' });
+      return null;
+    }
+
+    if (response.status !== 200) {
+      await refundCredits(userId, expectedCredits);
+      res.status(response.status);
+      for (const [key, value] of Object.entries(response.headers)) {
+        res.setHeader(key, value);
+      }
+      response.data.pipe(res);
+      return null;
+    }
+
+    fastapiCredits   = parseInt(response.headers['x-credits-deducted']  || '0', 10);
+    fastapiCharCount = parseInt(response.headers['x-char-count']         || '0', 10);
+    fastapiEmotion   = parseInt(response.headers['x-emotion-tag-count']  || '0', 10);
+    tone             = response.headers['x-tone'] || null;
+    audioStream      = response;
   }
 
-  // FastAPI reports its own computed billing in headers. We trust our own
-  // computation as the authoritative deduction; we only use FastAPI's headers
-  // for reconciliation (refund the diff if FastAPI saw fewer billable units).
-  const fastapiCredits = parseInt(response.headers['x-credits-deducted'] || '0', 10);
-  const fastapiCharCount = parseInt(response.headers['x-char-count'] || '0', 10);
-  const fastapiEmotion = parseInt(response.headers['x-emotion-tag-count'] || '0', 10);
-  const tone = response.headers['x-tone'] || null;
+  // Reconcile: we trust our own pre-computed credits as the authoritative
+  // deduction; refund the diff if the engine saw fewer billable units.
 
   let finalCredits = expectedCredits;
   let finalChars = charCount;
@@ -234,7 +315,7 @@ const performBilledTts = async ({ req, res, userId, apiKeyId, endpointType }) =>
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Access-Control-Expose-Headers', 'x-credits-remaining, x-credits-deducted, x-char-count, x-emotion-tag-count, x-tone');
 
-  return response;
+  return audioStream;
 };
 
 const proxyTTS = async (req, res) => {
@@ -268,24 +349,42 @@ const proxySTT = async (req, res) => {
       return res.status(402).json({ error: 'Insufficient credits. Please top up your balance.' });
     }
 
-    const FormData = require('form-data');
-    const form = new FormData();
-    form.append('file', req.file.buffer, req.file.originalname);
-
     let response;
-    try {
-      response = await axios.post(`${FASTAPI_URL}/v1/stt`, form, {
-        headers: {
-          'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}`,
-          ...form.getHeaders(),
-          ...NGROK_BYPASS_HEADER,
-        },
-        validateStatus: () => true,
-      });
-    } catch (err) {
-      await refundCredits(req.user.id, RESERVE_MIN);
-      console.error('STT upstream error:', err.message);
-      return res.status(502).json({ error: 'Failed to reach STT engine' });
+    if (USE_RUNPOD) {
+      try {
+        const audio_base64 = req.file.buffer.toString('base64');
+        const output = await runpodCall(
+          { action: 'stt', audio_base64, filename: req.file.originalname },
+          130000,
+        );
+        if (output.error) {
+          await refundCredits(req.user.id, RESERVE_MIN);
+          return res.status(500).json({ error: output.error });
+        }
+        response = { status: 200, data: output };
+      } catch (err) {
+        await refundCredits(req.user.id, RESERVE_MIN);
+        console.error('STT RunPod error:', err.message);
+        return res.status(502).json({ error: 'Failed to reach STT engine (RunPod)' });
+      }
+    } else {
+      const FormData = require('form-data');
+      const form = new FormData();
+      form.append('file', req.file.buffer, req.file.originalname);
+      try {
+        response = await axios.post(`${FASTAPI_URL}/v1/stt`, form, {
+          headers: {
+            'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}`,
+            ...form.getHeaders(),
+            ...NGROK_BYPASS_HEADER,
+          },
+          validateStatus: () => true,
+        });
+      } catch (err) {
+        await refundCredits(req.user.id, RESERVE_MIN);
+        console.error('STT upstream error:', err.message);
+        return res.status(502).json({ error: 'Failed to reach STT engine' });
+      }
     }
 
     if (response.status !== 200) {
@@ -335,6 +434,12 @@ const proxySTT = async (req, res) => {
 
 const proxyVoices = async (req, res) => {
   try {
+    if (USE_RUNPOD) {
+      const output = await runpodCall({ action: 'voices' }, 30000);
+      if (output.error) return res.status(500).json({ error: output.error });
+      return res.json(output);
+    }
+
     const response = await axios.get(`${FASTAPI_URL}/v1/voices`, {
       headers: {
         'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}`,
@@ -444,6 +549,22 @@ const proxyDemoTTS = async (req, res) => {
     if (!demoCheck.ok) {
       return res.status(400).json({ error: demoCheck.error });
     }
+
+    if (USE_RUNPOD) {
+      let output;
+      try {
+        output = await runpodCall({ action: 'tts', ...req.body });
+      } catch (err) {
+        console.error('Demo TTS RunPod error:', err.message);
+        return res.status(502).json({ error: 'Demo TTS failed' });
+      }
+      if (output.error) return res.status(500).json({ error: output.error });
+      const audioBuffer = Buffer.from(output.audio_base64 || '', 'base64');
+      res.setHeader('Content-Type', 'audio/wav');
+      res.setHeader('Cache-Control', 'no-cache');
+      return res.send(audioBuffer);
+    }
+
     const response = await axios.post(`${FASTAPI_URL}/v1/tts`, req.body, {
       headers: {
         'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}`,
@@ -483,24 +604,42 @@ const proxyStudioSTT = async (req, res) => {
       return res.status(402).json({ error: 'Insufficient credits.' });
     }
 
-    const FormData = require('form-data');
-    const form = new FormData();
-    form.append('file', req.file.buffer, req.file.originalname);
-
     let response;
-    try {
-      response = await axios.post(`${FASTAPI_URL}/v1/stt`, form, {
-        headers: {
-          'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}`,
-          ...form.getHeaders(),
-          ...NGROK_BYPASS_HEADER,
-        },
-        validateStatus: () => true,
-      });
-    } catch (err) {
-      await refundCredits(req.userId, RESERVE_MIN);
-      console.error('Studio STT upstream error:', err.message);
-      return res.status(502).json({ error: 'Failed to reach STT engine' });
+    if (USE_RUNPOD) {
+      try {
+        const audio_base64 = req.file.buffer.toString('base64');
+        const output = await runpodCall(
+          { action: 'stt', audio_base64, filename: req.file.originalname },
+          130000,
+        );
+        if (output.error) {
+          await refundCredits(req.userId, RESERVE_MIN);
+          return res.status(500).json({ error: output.error });
+        }
+        response = { status: 200, data: output };
+      } catch (err) {
+        await refundCredits(req.userId, RESERVE_MIN);
+        console.error('Studio STT RunPod error:', err.message);
+        return res.status(502).json({ error: 'Failed to reach STT engine (RunPod)' });
+      }
+    } else {
+      const FormData = require('form-data');
+      const form = new FormData();
+      form.append('file', req.file.buffer, req.file.originalname);
+      try {
+        response = await axios.post(`${FASTAPI_URL}/v1/stt`, form, {
+          headers: {
+            'Authorization': `Bearer ${FASTAPI_INTERNAL_KEY}`,
+            ...form.getHeaders(),
+            ...NGROK_BYPASS_HEADER,
+          },
+          validateStatus: () => true,
+        });
+      } catch (err) {
+        await refundCredits(req.userId, RESERVE_MIN);
+        console.error('Studio STT upstream error:', err.message);
+        return res.status(502).json({ error: 'Failed to reach STT engine' });
+      }
     }
 
     if (response.status !== 200) {

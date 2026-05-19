@@ -306,7 +306,35 @@ def split_text(text, max_chars=300):
         if current.strip():
             chunks.append(current.strip())
 
-    return [c for c in chunks if c.strip()]
+    # Step 3: merge micro-chunks with the following chunk.
+    #
+    # Very short chunks (e.g. "hi!" = 3 chars) don't give Orpheus enough
+    # context to stabilise prosody.  On bright/expressive voices like mia,
+    # a standalone "!" causes an extreme pitch spike that sounds unnatural
+    # ("weird").  Merging anything shorter than MIN_CHUNK_CHARS into the
+    # following chunk gives the model enough surrounding text to render
+    # natural intonation while staying well inside the max_chars budget.
+    MIN_CHUNK_CHARS = 20
+    merged: list[str] = []
+    i = 0
+    while i < len(chunks):
+        chunk = chunks[i].strip()
+        if not chunk:
+            i += 1
+            continue
+        # If this chunk is tiny AND there's a next chunk to merge into, join them.
+        if len(chunk) < MIN_CHUNK_CHARS and i + 1 < len(chunks):
+            next_chunk = chunks[i + 1].strip()
+            combined = (chunk + " " + next_chunk).strip()
+            # Only merge if the combined length stays within budget.
+            if len(combined) <= max_chars:
+                chunks[i + 1] = combined  # replace next with merged; skip current
+                i += 1
+                continue
+        merged.append(chunk)
+        i += 1
+
+    return [c for c in merged if c.strip()]
 
 
 

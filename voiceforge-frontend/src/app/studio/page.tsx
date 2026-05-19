@@ -1034,7 +1034,7 @@ function PlaygroundView({ text, setText, user, setUser, setActiveTab }: { text: 
             <>
               {/* Quick Emotion Tags */}
               <div className="bg-white/60 backdrop-blur-xl border border-black/5 rounded-2xl p-4 md:p-5 shadow-[0_2px_20px_rgba(0,0,0,0.02)]">
-                <h3 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3 flex items-center gap-2"><Sparkles className="w-3 h-3 text-orange-500"/> Insert Emotion Tag</h3>
+                <h3 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3 flex items-center gap-2"><Sparkles className="w-3 h-3 text-orange-500"/> Insert Emotion Tag <span className="text-[9px] font-bold bg-orange-100 text-orange-600 border border-orange-200 px-1.5 py-0.5 rounded-full uppercase tracking-widest">Beta</span></h3>
                 <div className="flex flex-wrap gap-2">
                   {EMOTIONS.map(tag => (
                     <button key={tag} onClick={() => insertTag(tag)} className="px-2.5 sm:px-3 py-1.5 bg-neutral-100/80 hover:bg-orange-100 hover:text-orange-700 text-neutral-600 text-xs sm:text-sm font-medium rounded-lg transition-all active:scale-95 border border-black/5 shadow-sm">
@@ -1414,7 +1414,7 @@ function PlaygroundView({ text, setText, user, setUser, setActiveTab }: { text: 
 
             {/* Speaking Tone Dropdown */}
             <div className="mb-5" ref={toneRef}>
-              <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2">Speaking Tone</label>
+              <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2 flex items-center gap-2">Speaking Tone <span className="text-[9px] font-bold bg-orange-100 text-orange-600 border border-orange-200 px-1.5 py-0.5 rounded-full uppercase tracking-widest">Beta</span></label>
               <div className="relative">
                 {/* Trigger */}
                 <button

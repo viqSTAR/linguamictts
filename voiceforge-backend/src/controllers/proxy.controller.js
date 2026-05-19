@@ -304,7 +304,9 @@ const performBilledTts = async ({ req, res, userId, apiKeyId, endpointType }) =>
 
   // Forward upstream headers but override x-credits-* with the authoritative
   // values we computed and persisted.
-  for (const [key, value] of Object.entries(response.headers)) {
+  // NOTE: use audioStream.headers — in the RunPod branch `response` is not in
+  // scope; audioStream is the unified handle for both paths.
+  for (const [key, value] of Object.entries(audioStream.headers || {})) {
     const lower = key.toLowerCase();
     if (lower === 'x-credits-remaining' || lower === 'x-credits-deducted') continue;
     res.setHeader(key, value);

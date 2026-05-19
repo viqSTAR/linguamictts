@@ -102,14 +102,31 @@ const createDodoCheckout = async (req, res) => {
         return res.status(400).json({ error: 'Top-up amount must match a configured tier ($1, $5, $10)' });
       }
 
-      const { checkoutUrl, sessionId } = await dodo.createTopUpCheckout({
-        userId: user.id,
-        email: user.email,
-        name: user.name,
-        amountUSD,
-        dodoCustomerId: user.dodoCustomerId,
-      });
-      return res.json({ checkoutUrl, sessionId });
+      let checkoutResult;
+      try {
+        checkoutResult = await dodo.createTopUpCheckout({
+          userId: user.id,
+          email: user.email,
+          name: user.name,
+          amountUSD,
+          dodoCustomerId: user.dodoCustomerId,
+        });
+      } catch (err) {
+        if (err.status === 404 && user.dodoCustomerId) {
+          console.warn(`[Dodo] Customer ${user.dodoCustomerId} not found for user ${user.id} (likely test/live mode mismatch). Clearing ID and retrying.`);
+          await prisma.user.update({ where: { id: user.id }, data: { dodoCustomerId: null } });
+          checkoutResult = await dodo.createTopUpCheckout({
+            userId: user.id,
+            email: user.email,
+            name: user.name,
+            amountUSD,
+            dodoCustomerId: null,
+          });
+        } else {
+          throw err;
+        }
+      }
+      return res.json(checkoutResult);
     }
 
     if (kind === 'plan') {
@@ -140,14 +157,31 @@ const createDodoCheckout = async (req, res) => {
         });
       }
 
-      const { checkoutUrl, sessionId } = await dodo.createPlanCheckout({
-        userId: user.id,
-        email: user.email,
-        name: user.name,
-        planKey,
-        dodoCustomerId: user.dodoCustomerId,
-      });
-      return res.json({ checkoutUrl, sessionId });
+      let checkoutResult;
+      try {
+        checkoutResult = await dodo.createPlanCheckout({
+          userId: user.id,
+          email: user.email,
+          name: user.name,
+          planKey,
+          dodoCustomerId: user.dodoCustomerId,
+        });
+      } catch (err) {
+        if (err.status === 404 && user.dodoCustomerId) {
+          console.warn(`[Dodo] Customer ${user.dodoCustomerId} not found for user ${user.id} (likely test/live mode mismatch). Clearing ID and retrying.`);
+          await prisma.user.update({ where: { id: user.id }, data: { dodoCustomerId: null } });
+          checkoutResult = await dodo.createPlanCheckout({
+            userId: user.id,
+            email: user.email,
+            name: user.name,
+            planKey,
+            dodoCustomerId: null,
+          });
+        } else {
+          throw err;
+        }
+      }
+      return res.json(checkoutResult);
     }
 
     return res.status(400).json({ error: "kind must be 'topup' or 'plan'" });

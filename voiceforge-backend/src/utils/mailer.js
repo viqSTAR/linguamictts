@@ -18,6 +18,9 @@ const getTransport = () => {
     port: SMTP_PORT ? parseInt(SMTP_PORT, 10) : 587,
     secure: SMTP_SECURE === 'true',
     auth: { user: SMTP_USER, pass: SMTP_PASS },
+    connectionTimeout: 5000,
+    greetingTimeout: 5000,
+    socketTimeout: 5000,
   });
   return cachedTransport;
 };

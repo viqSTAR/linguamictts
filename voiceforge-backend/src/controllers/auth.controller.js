@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const axios = require('axios');
 const prisma = require('../utils/prisma');
 const { FIRST_MONTH_FREE_CREDITS } = require('../utils/credits');
+const { sendPasswordResetCode } = require('../utils/mailer');
 const { OAuth2Client } = require('google-auth-library');
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -383,10 +384,86 @@ const updateMe = async (req, res) => {
   }
 };
 
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    
+    if (!user) {
+      return res.json({ message: 'If an account exists, a reset code has been sent.' });
+    }
+
+    const resetToken = Math.floor(100000 + Math.random() * 900000).toString();
+    const resetTokenExpiry = new Date(Date.now() + 30 * 60 * 1000);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { resetToken, resetTokenExpiry }
+    });
+
+    await sendPasswordResetCode({
+      to: user.email,
+      name: user.name,
+      code: resetToken,
+    });
+
+    res.json({ message: 'If an account exists, a reset code has been sent.' });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const resetPassword = async (req, res) => {
+  try {
+    const { email, code, newPassword } = req.body;
+    
+    if (!email || !code || !newPassword) {
+      return res.status(400).json({ error: 'Email, code, and new password are required' });
+    }
+
+    const validationError = validateCredentials({ email, password: newPassword });
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+
+    if (!user || user.resetToken !== code || !user.resetTokenExpiry || user.resetTokenExpiry < new Date()) {
+      return res.status(400).json({ error: 'Invalid or expired reset code' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(newPassword, salt);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        resetToken: null,
+        resetTokenExpiry: null,
+      }
+    });
+
+    res.json({ message: 'Password has been successfully reset' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 module.exports = {
   register,
   login,
   getMe,
   updateMe,
   googleAuth,
+  forgotPassword,
+  resetPassword,
 };

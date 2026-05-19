@@ -454,6 +454,60 @@ const sendCancellationAck = async ({ to, name, planKey, currentPeriodEnd }) => {
   }
 };
 
+// ─── Password reset ──────────────────────────────────────────────────────────
+const renderPasswordResetEmail = ({ name, code }) => {
+  const greeting = name ? `Hi ${name},` : 'Hi there,';
+  const subject = `Your LinguaMic password reset code: ${code}`;
+  
+  const text = [
+    greeting,
+    '',
+    `We received a request to reset your password. Your 6-digit verification code is:`,
+    '',
+    `    ${code}`,
+    '',
+    `Enter this code in the app to set a new password. It will expire in 30 minutes.`,
+    '',
+    `If you didn't request a password reset, you can safely ignore this email. Your password won't be changed.`,
+    '',
+    '— LinguaMic',
+  ].join('\n');
+  
+  const html = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1f2937; max-width: 560px; margin: 0 auto;">
+      <h2 style="color: #c2410c; margin-bottom: 8px;">Reset your password</h2>
+      <p>${greeting}</p>
+      <p>We received a request to reset your password. Your 6-digit verification code is:</p>
+      
+      <div style="background: #f3f4f6; border-radius: 8px; padding: 24px; text-align: center; margin: 24px 0;">
+        <span style="font-size: 32px; font-weight: 700; letter-spacing: 0.2em; color: #111827;">${code}</span>
+      </div>
+
+      <p>Enter this code in the app to set a new password. It will expire in 30 minutes.</p>
+      <p style="font-size: 13px; color: #6b7280; margin-top: 24px;">If you didn't request a password reset, you can safely ignore this email. Your password won't be changed.</p>
+      <p style="color: #6b7280; margin-top: 32px; font-size: 13px;">— LinguaMic</p>
+    </div>
+  `;
+  return { subject, text, html };
+};
+
+const sendPasswordResetCode = async ({ to, name, code }) => {
+  const transport = getTransport();
+  if (!transport) {
+    console.warn('[mailer] SMTP not configured; skipping password reset email for', to);
+    // Even if no email is sent, return true in dev so the UI can proceed
+    return true; 
+  }
+  const { subject, text, html } = renderPasswordResetEmail({ name, code });
+  try {
+    await transport.sendMail({ from: fromAddress(), to, subject, text, html });
+    return true;
+  } catch (err) {
+    console.error('[mailer] failed to send password reset code to', to, err.message);
+    return false;
+  }
+};
+
 module.exports = {
   sendRenewalNotice,
   sendPurchaseConfirmation,
@@ -461,4 +515,5 @@ module.exports = {
   sendRenewalReceipt,
   sendTopUpConfirmation,
   sendCancellationAck,
+  sendPasswordResetCode,
 };

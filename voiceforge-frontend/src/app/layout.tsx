@@ -17,6 +17,11 @@ const geistMono = localFont({
 export const metadata: Metadata = {
   title: "LinguaMic - Next Generation AI Voice Studio",
   description: "Create lifelike, expressive voiceovers in seconds with LinguaMic.",
+  icons: {
+    icon: "/icon.svg",
+    shortcut: "/icon.svg",
+    apple: "/icon.svg",
+  },
 };
 
 export default function RootLayout({

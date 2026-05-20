@@ -87,6 +87,18 @@ export default function Login() {
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (resetCode.length !== 6) {
+      setError('Please enter the 6-digit code from your email.');
+      return;
+    }
+    if (!newPassword || newPassword.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
+    if (newPassword.length > 128) {
+      setError('Password must be under 128 characters.');
+      return;
+    }
     setLoading(true);
     setError('');
     setSuccess('');
@@ -215,7 +227,7 @@ export default function Login() {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-neutral-600 mb-1.5 uppercase tracking-wide ml-1">New Password</label>
-                <input type="password" required value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="••••••••" className="w-full h-12 bg-white/50 border border-black/10 rounded-xl px-4 text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all focus:bg-white" />
+                <input type="password" required minLength={8} maxLength={128} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Min. 8 characters" className="w-full h-12 bg-white/50 border border-black/10 rounded-xl px-4 text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all focus:bg-white" />
               </div>
               
               <button type="submit" disabled={loading} className="w-full h-12 bg-black text-white rounded-xl font-medium mt-6 hover:bg-neutral-800 transition-all flex items-center justify-center gap-2 group shadow-[0_10px_20px_-10px_rgba(0,0,0,0.5)] disabled:opacity-70 disabled:cursor-not-allowed">

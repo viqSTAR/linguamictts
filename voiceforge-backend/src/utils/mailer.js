@@ -1,34 +1,38 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
-const {
-  SMTP_HOST,
-  SMTP_PORT,
-  SMTP_USER,
-  SMTP_PASS,
-  SMTP_FROM,
-  SMTP_SECURE,
-} = process.env;
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+const RESEND_FROM    = process.env.RESEND_FROM    || 'LinguaMic <onboarding@resend.dev>';
 
-let cachedTransport = null;
-const getTransport = () => {
-  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) return null;
-  if (cachedTransport) return cachedTransport;
-  const useDirectTls = SMTP_SECURE === 'true';
-  cachedTransport = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: SMTP_PORT ? parseInt(SMTP_PORT, 10) : 587,
-    secure: useDirectTls,
-    requireTLS: !useDirectTls, // force STARTTLS on port 587; no-op when secure=true
-    auth: { user: SMTP_USER, pass: SMTP_PASS },
-    connectionTimeout: 15000,
-    greetingTimeout: 15000,
-    socketTimeout: 60000,
-  });
-  console.info('[mailer] SMTP transport created for host:', SMTP_HOST);
-  return cachedTransport;
+let resendClient = null;
+const getClient = () => {
+  if (!RESEND_API_KEY) return null;
+  if (!resendClient) {
+    resendClient = new Resend(RESEND_API_KEY);
+    console.info('[mailer] Resend client initialised, from:', RESEND_FROM);
+  }
+  return resendClient;
 };
 
-const fromAddress = () => SMTP_FROM || SMTP_USER || 'company@linguamic.com';
+const sendEmail = async ({ to, subject, html, text }) => {
+  const client = getClient();
+  if (!client) {
+    console.error('[mailer] RESEND_API_KEY not configured; cannot send email to', to);
+    return false;
+  }
+  try {
+    const { error } = await client.emails.send({ from: RESEND_FROM, to, subject, html, text });
+    if (error) {
+      console.error('[mailer] Resend error sending to', to, error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('[mailer] Resend exception sending to', to, err.message);
+    return false;
+  }
+};
+
+const fromAddress = () => RESEND_FROM;
 
 const renderRenewalEmail = ({ name, planKey, currentPeriodEnd, kind }) => {
   const planLabel = planKey.charAt(0) + planKey.slice(1).toLowerCase();
@@ -94,19 +98,8 @@ const renderRenewalEmail = ({ name, planKey, currentPeriodEnd, kind }) => {
 // Sends a renewal/expiry notice. Returns true on success, false if SMTP is
 // not configured (caller can decide to log/skip) or on transport error.
 const sendRenewalNotice = async ({ to, name, planKey, currentPeriodEnd, kind }) => {
-  const transport = getTransport();
-  if (!transport) {
-    console.warn('[mailer] SMTP not configured; skipping renewal notice for', to);
-    return false;
-  }
   const { subject, text, html } = renderRenewalEmail({ name, planKey, currentPeriodEnd, kind });
-  try {
-    await transport.sendMail({ from: fromAddress(), to, subject, text, html });
-    return true;
-  } catch (err) {
-    console.error('[mailer] failed to send renewal notice to', to, err.message);
-    return false;
-  }
+  return sendEmail({ to, subject, text, html });
 };
 
 // ─── Subscription purchase / activation confirmation ─────────────────────────
@@ -175,19 +168,8 @@ const renderPurchaseEmail = ({ name, planKey, monthlyCredits, priceUSD, currentP
 };
 
 const sendPurchaseConfirmation = async ({ to, name, planKey, monthlyCredits, priceUSD, currentPeriodEnd }) => {
-  const transport = getTransport();
-  if (!transport) {
-    console.warn('[mailer] SMTP not configured; skipping purchase confirmation for', to);
-    return false;
-  }
   const { subject, text, html } = renderPurchaseEmail({ name, planKey, monthlyCredits, priceUSD, currentPeriodEnd });
-  try {
-    await transport.sendMail({ from: fromAddress(), to, subject, text, html });
-    return true;
-  } catch (err) {
-    console.error('[mailer] failed to send purchase confirmation to', to, err.message);
-    return false;
-  }
+  return sendEmail({ to, subject, text, html });
 };
 
 // ─── Refund confirmation ─────────────────────────────────────────────────────
@@ -238,19 +220,8 @@ const renderRefundEmail = ({ name, planKey, priceUSD, refundId }) => {
 };
 
 const sendRefundConfirmation = async ({ to, name, planKey, priceUSD, refundId }) => {
-  const transport = getTransport();
-  if (!transport) {
-    console.warn('[mailer] SMTP not configured; skipping refund confirmation for', to);
-    return false;
-  }
   const { subject, text, html } = renderRefundEmail({ name, planKey, priceUSD, refundId });
-  try {
-    await transport.sendMail({ from: fromAddress(), to, subject, text, html });
-    return true;
-  } catch (err) {
-    console.error('[mailer] failed to send refund confirmation to', to, err.message);
-    return false;
-  }
+  return sendEmail({ to, subject, text, html });
 };
 
 // ─── Renewal receipt ─────────────────────────────────────────────────────────
@@ -306,19 +277,8 @@ const renderRenewalReceiptEmail = ({ name, planKey, monthlyCredits, priceUSD, cu
 };
 
 const sendRenewalReceipt = async ({ to, name, planKey, monthlyCredits, priceUSD, currentPeriodEnd }) => {
-  const transport = getTransport();
-  if (!transport) {
-    console.warn('[mailer] SMTP not configured; skipping renewal receipt for', to);
-    return false;
-  }
   const { subject, text, html } = renderRenewalReceiptEmail({ name, planKey, monthlyCredits, priceUSD, currentPeriodEnd });
-  try {
-    await transport.sendMail({ from: fromAddress(), to, subject, text, html });
-    return true;
-  } catch (err) {
-    console.error('[mailer] failed to send renewal receipt to', to, err.message);
-    return false;
-  }
+  return sendEmail({ to, subject, text, html });
 };
 
 // ─── Top-up receipt ──────────────────────────────────────────────────────────
@@ -373,19 +333,8 @@ const renderTopUpEmail = ({ name, amountUSD, credits, newBalance }) => {
 };
 
 const sendTopUpConfirmation = async ({ to, name, amountUSD, credits, newBalance }) => {
-  const transport = getTransport();
-  if (!transport) {
-    console.warn('[mailer] SMTP not configured; skipping top-up confirmation for', to);
-    return false;
-  }
   const { subject, text, html } = renderTopUpEmail({ name, amountUSD, credits, newBalance });
-  try {
-    await transport.sendMail({ from: fromAddress(), to, subject, text, html });
-    return true;
-  } catch (err) {
-    console.error('[mailer] failed to send top-up confirmation to', to, err.message);
-    return false;
-  }
+  return sendEmail({ to, subject, text, html });
 };
 
 // ─── Cancellation acknowledgement ────────────────────────────────────────────
@@ -445,19 +394,8 @@ const renderCancellationEmail = ({ name, planKey, currentPeriodEnd }) => {
 };
 
 const sendCancellationAck = async ({ to, name, planKey, currentPeriodEnd }) => {
-  const transport = getTransport();
-  if (!transport) {
-    console.warn('[mailer] SMTP not configured; skipping cancellation ack for', to);
-    return false;
-  }
   const { subject, text, html } = renderCancellationEmail({ name, planKey, currentPeriodEnd });
-  try {
-    await transport.sendMail({ from: fromAddress(), to, subject, text, html });
-    return true;
-  } catch (err) {
-    console.error('[mailer] failed to send cancellation ack to', to, err.message);
-    return false;
-  }
+  return sendEmail({ to, subject, text, html });
 };
 
 // ─── Password reset ──────────────────────────────────────────────────────────
@@ -498,19 +436,8 @@ const renderPasswordResetEmail = ({ name, code }) => {
 };
 
 const sendPasswordResetCode = async ({ to, name, code }) => {
-  const transport = getTransport();
-  if (!transport) {
-    console.error('[mailer] SMTP not configured; cannot send password reset email to', to);
-    return false;
-  }
   const { subject, text, html } = renderPasswordResetEmail({ name, code });
-  try {
-    await transport.sendMail({ from: fromAddress(), to, subject, text, html });
-    return true;
-  } catch (err) {
-    console.error('[mailer] failed to send password reset code to', to, err.message);
-    return false;
-  }
+  return sendEmail({ to, subject, text, html });
 };
 
 module.exports = {

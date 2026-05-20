@@ -13,15 +13,18 @@ let cachedTransport = null;
 const getTransport = () => {
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) return null;
   if (cachedTransport) return cachedTransport;
+  const useDirectTls = SMTP_SECURE === 'true';
   cachedTransport = nodemailer.createTransport({
     host: SMTP_HOST,
     port: SMTP_PORT ? parseInt(SMTP_PORT, 10) : 587,
-    secure: SMTP_SECURE === 'true',
+    secure: useDirectTls,
+    requireTLS: !useDirectTls, // force STARTTLS on port 587; no-op when secure=true
     auth: { user: SMTP_USER, pass: SMTP_PASS },
-    connectionTimeout: 5000,
-    greetingTimeout: 5000,
-    socketTimeout: 5000,
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 60000,
   });
+  console.info('[mailer] SMTP transport created for host:', SMTP_HOST);
   return cachedTransport;
 };
 
@@ -497,9 +500,8 @@ const renderPasswordResetEmail = ({ name, code }) => {
 const sendPasswordResetCode = async ({ to, name, code }) => {
   const transport = getTransport();
   if (!transport) {
-    console.warn('[mailer] SMTP not configured; skipping password reset email for', to);
-    // Even if no email is sent, return true in dev so the UI can proceed
-    return true; 
+    console.error('[mailer] SMTP not configured; cannot send password reset email to', to);
+    return false;
   }
   const { subject, text, html } = renderPasswordResetEmail({ name, code });
   try {

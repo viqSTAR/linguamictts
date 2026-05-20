@@ -562,14 +562,19 @@ function PlaygroundView({ text, setText, user, setUser, setActiveTab }: { text: 
       const token = localStorage.getItem('token') || '';
       const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
       
+      const abortController = new AbortController();
+      const abortTimeoutId = setTimeout(() => abortController.abort(), 360000);
+
       const response = await fetch(`${API_URL}/v1/studio/tts`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: abortController.signal,
       });
+      clearTimeout(abortTimeoutId);
 
       if (!response.ok) {
          throw new Error('Server error: ' + response.status);
@@ -720,11 +725,21 @@ function PlaygroundView({ text, setText, user, setUser, setActiveTab }: { text: 
       setAudioUrl(blobUrl);
       await refreshCloudUrls();
 
-    } catch (err) {
-      console.error('Generation failed', err);
-      alert('We couldn’t generate that audio. Please check your credit balance and try again.');
-      setGenerating(false);
+    } catch (err: unknown) {
+      console.error(‘Generation failed’, err);
+
+      let message = ‘Audio generation failed. Please try again.’;
+      if (err instanceof DOMException && err.name === ‘AbortError’) {
+        message = ‘RunPod is warming up. Generation timed out — please try again in a moment.’;
+      } else if (err instanceof Error && err.message.startsWith(‘Server error: 402’)) {
+        message = ‘Insufficient credits. Please top up your balance and try again.’;
+      } else if (err instanceof Error && err.message.startsWith(‘Server error: 502’)) {
+        message = ‘Could not reach the TTS engine. Please try again.’;
+      }
+
+      alert(message);
     } finally {
+      setGenerating(false);
       const context = audioContextRef.current;
       if (context) {
         const remainingTime = Math.max(0, nextPlayTimeRef.current - context.currentTime);

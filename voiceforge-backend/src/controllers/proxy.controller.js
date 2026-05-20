@@ -38,29 +38,86 @@ const USE_RUNPOD = Boolean(RUNPOD_ENDPOINT_ID && RUNPOD_API_KEY);
  * @param {number} [timeoutMs=310000] - Axios timeout in ms (slightly > RunPod's max 300 s)
  */
 async function runpodCall(input, timeoutMs = 310000) {
-  const url = `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/runsync`;
+  const deadline = Date.now() + timeoutMs;
+  // RunPod's /runsync holds the HTTP connection for ~90s then returns the job
+  // in IN_QUEUE/IN_PROGRESS if the worker is still cold-starting. We use 95s
+  // to capture that sync window, then fall back to polling /status/{jobId}.
+  const RUNSYNC_TIMEOUT_MS = 95000;
+
+  const syncUrl = `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/runsync`;
+  const authHeaders = { Authorization: `Bearer ${RUNPOD_API_KEY}`, 'Content-Type': 'application/json' };
+
   const resp = await axios.post(
-    url,
+    syncUrl,
     { input },
-    {
-      headers: {
-        Authorization: `Bearer ${RUNPOD_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: timeoutMs,
-      validateStatus: () => true,
-    },
+    { headers: authHeaders, timeout: RUNSYNC_TIMEOUT_MS, validateStatus: () => true },
   );
 
   if (resp.status !== 200) {
     throw new Error(`RunPod HTTP ${resp.status}: ${JSON.stringify(resp.data).slice(0, 300)}`);
   }
 
-  const body = resp.data;
-  if (body.status === 'FAILED' || body.status === 'CANCELLED') {
-    return { error: `RunPod job ${body.status}: ${body.error || 'unknown'}` };
+  const syncBody = resp.data;
+
+  if (syncBody.status === 'COMPLETED') {
+    const output = syncBody.output || {};
+    if (!output.audio_base64 || Buffer.from(output.audio_base64, 'base64').length < 200) {
+      return { error: 'TTS engine returned empty audio. Please try again.' };
+    }
+    return output;
   }
-  return body.output || {};
+
+  if (syncBody.status === 'FAILED' || syncBody.status === 'CANCELLED') {
+    return { error: `RunPod job ${syncBody.status}: ${syncBody.error || 'unknown'}` };
+  }
+
+  // Job is IN_QUEUE or IN_PROGRESS (cold-start) — poll /status/{jobId} until done
+  const jobId = syncBody.id;
+  if (!jobId) {
+    throw new Error(`RunPod returned no job id: ${JSON.stringify(syncBody).slice(0, 200)}`);
+  }
+
+  const statusUrl = `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/status/${jobId}`;
+  console.info(`[runpod] job ${jobId} is ${syncBody.status}, polling (${Math.round((deadline - Date.now()) / 1000)}s left)`);
+
+  let pollIntervalMs = 3000;
+
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, pollIntervalMs));
+    pollIntervalMs = Math.min(pollIntervalMs + 1000, 10000);
+
+    let pollResp;
+    try {
+      pollResp = await axios.get(statusUrl, {
+        headers: { Authorization: `Bearer ${RUNPOD_API_KEY}` },
+        timeout: 15000,
+        validateStatus: () => true,
+      });
+    } catch (pollErr) {
+      console.warn(`[runpod] poll error for job ${jobId}:`, pollErr.message);
+      continue;
+    }
+
+    if (pollResp.status !== 200) continue;
+
+    const pollBody = pollResp.data;
+    console.info(`[runpod] job ${jobId} status: ${pollBody.status}`);
+
+    if (pollBody.status === 'COMPLETED') {
+      const output = pollBody.output || {};
+      if (!output.audio_base64 || Buffer.from(output.audio_base64, 'base64').length < 200) {
+        return { error: 'TTS engine returned empty audio. Please try again.' };
+      }
+      return output;
+    }
+
+    if (pollBody.status === 'FAILED' || pollBody.status === 'CANCELLED') {
+      return { error: `RunPod job ${pollBody.status}: ${pollBody.error || 'unknown'}` };
+    }
+    // IN_QUEUE / IN_PROGRESS — keep polling
+  }
+
+  return { error: 'RunPod job timed out. The TTS engine may be warming up — please try again.' };
 }
 
 const DEMO_MAX_CHARS = 500;
